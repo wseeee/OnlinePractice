@@ -1,11 +1,13 @@
 package Models
 
-import "gorm.io/gorm"
+import (
+	"gorm.io/gorm"
+)
 
 type Problem struct {
 	gorm.Model
 	Identity   string `gorm:"column:identity;type:varchar(36);" json:"identity"`
-	CategroyId string `gorm:"column:categroy_id;type:varchar(255);" json:"categroy_id"`
+	CategoryId string `gorm:"column:category_id;" json:"category_id"`
 	Title      string `gorm:"column:title;type:varchar(255);" json:"title"`
 	Content    string `gorm:"column:content;type:text;" json:"content"`
 	MaxMem     int    `gorm:"column:max_mem;type:int(11);" json:"max_mem"`
@@ -14,4 +16,11 @@ type Problem struct {
 
 func (table *Problem) TableName() string {
 	return "problem"
+}
+
+func GetProblemList(keyword string) *gorm.DB {
+
+	return DB.Model(new(Problem)).
+		Where("title like ? OR content like ?",
+			"%"+keyword+"%", "%"+keyword+"%")
 }
