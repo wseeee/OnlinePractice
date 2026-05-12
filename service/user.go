@@ -3,6 +3,9 @@ package service
 import (
 	"OnlinePrictice/Helper"
 	"OnlinePrictice/Models"
+	"OnlinePrictice/define"
+	"log"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -67,7 +70,7 @@ func Login(c *gin.Context) {
 	data := new(Models.UserBasic)
 	data.Name = username
 	data.Password = password
-	
+
 	err := Models.UserLogin(data).First(&data).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
@@ -94,6 +97,128 @@ func Login(c *gin.Context) {
 	}
 	c.JSON(200, gin.H{
 		"code": 200,
+		"data": map[string]interface{}{
+			"token": token,
+		},
+	})
+}
+
+// SendCode
+// @Tags 公共方法
+// @Summary 发送验证码
+// @Param mail formData string false "mail"
+// @Success 200 {string} json "{"code":"200","data":""}"
+// @Router /sendcode [post]
+func SendCode(c *gin.Context) {
+	mail := c.PostForm("mail")
+	if mail == "" {
+		c.JSON(200, gin.H{
+			"code": -1,
+			"msg":  "邮箱不能为空",
+		})
+		return
+	}
+	code := Helper.GenerateCode()
+	Models.RDB.Set(define.CTX, mail, code, time.Second*300)
+	err := Helper.SendEmail(mail, code)
+	if err != nil {
+		c.JSON(200, gin.H{
+			"code": -1,
+			"msg":  "发送邮件失败",
+		})
+		return
+	}
+	c.JSON(200, gin.H{
+		"code": 200,
+		"msg":  "发送成功",
+	})
+}
+
+// Register
+// @Tags 公共方法
+// @Summary 用户的注册
+// @Param name formData string true "用户名"
+// @Param password formData string true "密码"
+// @Param phone formData string false "phone"
+// @Param mail formData string true "mail"
+// @Param code formData string true "code"
+// @Success 200 {string} json "{"code":"200","data":""}"
+// @Router /register [post]
+func Register(c *gin.Context) {
+	name := c.PostForm("name")
+	password := c.PostForm("password")
+	mail := c.PostForm("mail")
+	phone := c.PostForm("phone")
+	code := c.PostForm("code")
+	if name == "" || password == "" || mail == "" || phone == "" || code == "" {
+		c.JSON(200, gin.H{
+			"code": -1,
+			"msg":  "必填信息不为空",
+		})
+		return
+	}
+
+	//验证码是否正确
+	GetCode, err := Models.RDB.Get(define.CTX, mail).Result()
+	if err != nil {
+		log.Print("获取验证码失败")
+		c.JSON(200, gin.H{
+			"code": -1,
+			"msg":  "验证码已过期",
+		})
+		return
+	}
+	if GetCode != code {
+		c.JSON(200, gin.H{
+			"code": -1,
+			"msg":  "验证码错误",
+		})
+		return
+	}
+	//判断邮箱是否存在
+	var count int64
+	err = Models.EmailExist(mail).Count(&count).Error
+	if err != nil {
+		c.JSON(200, gin.H{
+			"code": -1,
+			"msg":  "服务器异常，请稍后再试",
+		})
+		return
+	}
+	if count > 0 {
+		c.JSON(200, gin.H{
+			"code": -1,
+			"msg":  "该邮箱已注册",
+		})
+		return
+	}
+	//数据的插入
+	user := new(Models.UserBasic)
+	user.Name = name
+	user.Password = Helper.Md5(password)
+	user.Identity = Helper.GetUUID()
+	user.Mail = mail
+	user.Phone = phone
+
+	err = Models.InsertUser(user).Error
+	if err != nil {
+		c.JSON(200, gin.H{
+			"code": -1,
+			"msg":  "用户创建失败",
+		})
+		return
+	}
+
+	token, err := Helper.GenerateToken(user.Identity, user.Name)
+	if err != nil {
+		c.JSON(200, gin.H{
+			"code": -1,
+			"msg":  "生成token出错",
+		})
+	}
+	c.JSON(200, gin.H{
+		"code": 200,
+		"msg":  "用户创建成功",
 		"data": map[string]interface{}{
 			"token": token,
 		},

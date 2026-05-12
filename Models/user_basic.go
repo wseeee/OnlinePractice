@@ -24,3 +24,11 @@ func UserLogin(u *UserBasic) *gorm.DB {
 	return DB.Model(&UserBasic{}).
 		Where("name = ? AND password = ?", u.Name, u.Password)
 }
+
+func InsertUser(u *UserBasic) *gorm.DB {
+	return DB.Model(&UserBasic{}).Create(u)
+}
+
+func EmailExist(mail string) *gorm.DB {
+	return DB.Model(&UserBasic{}).Where("mail = ?", mail)
+}
