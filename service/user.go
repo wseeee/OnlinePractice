@@ -5,6 +5,7 @@ import (
 	"OnlinePrictice/Models"
 	"OnlinePrictice/define"
 	"log"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -223,4 +224,43 @@ func Register(c *gin.Context) {
 			"token": token,
 		},
 	})
+}
+
+// GetRankList
+// @Tags 公共方法
+// @Summary 排名
+// @Param page query int false "请输入当前页，默认第一页"
+// @Param size query int false "size"
+// @Success 200 {string} json "{"code":"200","data":""}"
+// @Router /rank-list [get]
+func GetRankList(c *gin.Context) {
+	size, _ := strconv.Atoi(c.DefaultQuery("size", define.DefaultSize))
+	page, err := strconv.Atoi(c.DefaultQuery("page", define.DefaultPage))
+	if err != nil {
+		c.JSON(200, gin.H{
+			"code": -1,
+			"msg":  "参数错误",
+		})
+		return
+	}
+	page = (page - 1) * size
+	var count int64
+	list := make([]*Models.UserBasic, 0)
+	err = Models.GetRankList().Find(&list).Count(&count).
+		Offset(page).Limit(size).Error
+	if err != nil {
+		c.JSON(200, gin.H{
+			"code": -1,
+			"msg":  "获取数据失败",
+		})
+		return
+	}
+	c.JSON(200, gin.H{
+		"code": 200,
+		"data": map[string]interface{}{
+			"count": count,
+			"list":  list,
+		},
+	})
+
 }
