@@ -12,3 +12,20 @@ type CategoryBasic struct {
 func (table *CategoryBasic) TableName() string {
 	return "category_basic"
 }
+
+func GetCategoryList(keyword string) *gorm.DB {
+	return DB.Model(new(CategoryBasic)).
+		Where("name like ?", "%"+keyword+"%")
+}
+
+func CreateCategory(c *CategoryBasic) *gorm.DB {
+	return DB.Model(new(CategoryBasic)).Create(c)
+}
+func DeleteCategory(identity string) *gorm.DB {
+	return DB.Model(new(CategoryBasic)).
+		Where("identity = ?", identity).Delete(new(CategoryBasic))
+}
+func UpdateCategory(identity string, c *CategoryBasic) *gorm.DB {
+	return DB.Model(new(CategoryBasic)).
+		Where("identity = ?", identity).Updates(c)
+}

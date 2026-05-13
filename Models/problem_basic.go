@@ -12,6 +12,9 @@ type ProblemBasic struct {
 	Content           string             `gorm:"column:content;type:text;" json:"content"`
 	MaxMem            int                `gorm:"column:max_mem;type:int(11);" json:"max_mem"`
 	MaxRuntime        int                `gorm:"column:max_runtime;type:int(11);" json:"max_runtime"`
+	SubmitNum         int                `gorm:"column:submit_num;type:int(11);" json:"submit_num"`
+	PassNum           int                `gorm:"column:pass_num;type:int(11);" json:"pass_num"`
+	TestCases         []*TestCase        `gorm:"foreignKey:problem_identity;references:identity" json:"test_cases"`
 }
 
 func (table *ProblemBasic) TableName() string {
@@ -40,4 +43,8 @@ func GetProblemDetail(identity string) *gorm.DB {
 		Preload("ProblemCategories").
 		Preload("ProblemCategories.CategoryBasic").
 		Where("identity = ?", identity)
+}
+
+func CreateProblem(p *ProblemBasic) *gorm.DB {
+	return DB.Model(new(ProblemBasic)).Create(p)
 }

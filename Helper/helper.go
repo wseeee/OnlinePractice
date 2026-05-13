@@ -1,12 +1,15 @@
 package Helper
 
 import (
+	"OnlinePrictice/define"
 	"crypto/md5"
 	"crypto/rand"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"math/big"
 	"net/smtp"
+	"os"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jordan-wright/email"
@@ -20,15 +23,17 @@ func Md5(str string) string {
 type UserJwt struct {
 	Identity string `json:"identity"`
 	Name     string `json:"name"`
+	IsAdmin  int    `json:"is_admin"`
 	jwt.RegisteredClaims
 }
 
 var myKey = []byte("Online_Practice")
 
-func GenerateToken(identity, name string) (string, error) {
+func GenerateToken(identity, name string, isAdmin int) (string, error) {
 	u := UserJwt{
 		Identity: identity,
 		Name:     name,
+		IsAdmin:  isAdmin,
 	}
 	tokenstring := jwt.NewWithClaims(jwt.SigningMethodHS256, u)
 	token, err := tokenstring.SignedString(myKey)
@@ -45,9 +50,10 @@ func AnalyseToken(token string) (*UserJwt, error) {
 			return myKey, nil
 		})
 	if err != nil {
-		log.Print("Failed to analyse token: %v", err)
+		log.Printf("Failed to analyse token: %v", err)
+		return nil, err
 	}
-	if claims.Valid {
+	if !claims.Valid {
 		return nil, fmt.Errorf("Analyse Token Error")
 	}
 	return user, nil
@@ -63,7 +69,7 @@ func SendEmail(useremail string, code string) error {
 
 	// 2. 设置邮件主题和内容
 	e.Subject = "验证码"
-	e.Text = []byte("纯文本内容")                 // 纯文本格式（备用）
+	e.Text = []byte("纯文本内容")                   // 纯文本格式（备用）
 	e.HTML = []byte("验证码：<b>" + code + "</b>") // HTML 格式（优先）
 
 	// 3. 连接 SMTP 服务器并发送邮件
@@ -89,4 +95,73 @@ func GenerateCode() string {
 	n, _ := rand.Int(rand.Reader, max)
 	code := 100000 + n.Int64()
 	return fmt.Sprintf("%d", code)
+}
+
+// 代码保存方法
+func SaveCode(code []byte) (string, error) {
+	dirname := "code/" + GetUUID()
+	path := dirname + "/main.go"
+	err := os.Mkdir(dirname, 0777)
+	if err != nil {
+		return "", err
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return "", err
+	}
+	f.Write(code)
+	defer f.Close()
+	return path, nil
+}
+
+// 检查golang代码的合法性
+func CheckGoCodeValid(path string) (bool, error) {
+	b, err := ioutil.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	code := string(b)
+	for i := 0; i < len(code)-6; i++ {
+		if code[i:i+6] == "import" {
+			var flag byte
+			for i = i + 7; i < len(code); i++ {
+				if code[i] == ' ' {
+					continue
+				}
+				flag = code[i]
+				break
+			}
+			if flag == '(' {
+				for i = i + 1; i < len(code); i++ {
+					if code[i] == ')' {
+						break
+					}
+					if code[i] == '"' {
+						t := ""
+						for i = i + 1; i < len(code); i++ {
+							if code[i] == '"' {
+								break
+							}
+							t += string(code[i])
+						}
+						if _, ok := define.ValidGolangPackageMap[t]; !ok {
+							return false, nil
+						}
+					}
+				}
+			} else if flag == '"' {
+				t := ""
+				for i = i + 1; i < len(code); i++ {
+					if code[i] == '"' {
+						break
+					}
+					t += string(code[i])
+				}
+				if _, ok := define.ValidGolangPackageMap[t]; !ok {
+					return false, nil
+				}
+			}
+		}
+	}
+	return true, nil
 }
