@@ -37,5 +37,5 @@ func EmailExist(mail string) *gorm.DB {
 }
 
 func GetRankList() *gorm.DB {
-	return DB.Model(&UserBasic{}).Order("finish_problem_num DESC,submit_num ASC")
+	return DB.Model(&UserBasic{}).Order("pass_num DESC,submit_num ASC")
 }

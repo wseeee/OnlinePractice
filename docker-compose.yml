@@ -1,0 +1,42 @@
+services:
+  # ==================== Go 后端 ====================
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: oj-backend
+    restart: always
+    environment:
+      DB_HOST: ${DB_HOST:-101.42.34.232}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_USER: ${DB_USER:-root}
+      DB_PASSWORD: ${DB_PASSWORD:-123456}
+      DB_NAME: ${DB_NAME:-onlinepractice}
+      REDIS_HOST: ${REDIS_HOST:-101.42.34.232}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-123456}
+      TZ: Asia/Shanghai
+    ports:
+      - "8080:8080"
+    extra_hosts:
+      - "host-machine:host-gateway"
+    networks:
+      - oj-net
+
+  # ==================== 前端 Nginx ====================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: oj-frontend
+    restart: always
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - oj-net
+
+networks:
+  oj-net:
+    driver: bridge

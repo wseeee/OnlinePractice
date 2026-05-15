@@ -9,9 +9,9 @@ type SubmitBasic struct {
 	gorm.Model
 	Identity        string        `gorm:"column:identity;type:varchar(36);" json:"identity"`
 	ProblemIdentity string        `gorm:"column:problem_identity;type:varchar(36);" json:"problem_identity"`
-	ProblemBasic    *ProblemBasic `gorm:"foreignKey:identity;references:problem_identity"`
+	ProblemBasic    *ProblemBasic `gorm:"foreignKey:identity;references:problem_identity" json:"problem_basic"`
 	UserIdentity    string        `gorm:"column:user_identity;type:varchar(36);" json:"user_identity"`
-	UserBasic       *UserBasic    `gorm:"foreignKey:identity;references:user_identity"`
+	UserBasic       *UserBasic    `gorm:"foreignKey:identity;references:user_identity" json:"user_basic"`
 	Path            string        `gorm:"column:path;type:varchar(255);" json:"path"`
 	Status          int           `gorm:"column:status;type:tinyint(1);" json:"status"`
 }

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx superpowers-zh *)",
+      "Bash(go build *)",
+      "Bash(git *)"
+    ]
+  }
+}

@@ -1,0 +1,25 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+
+# Claude
+.claude
+CLAUDE.md
+
+# 前端（后端构建不需要）
+frontend
+
+# 运行时产物
+code
+tmp
+
+# 文档
+docs/superpowers
+
+# OS
+.DS_Store
+Thumbs.db
