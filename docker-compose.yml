@@ -7,12 +7,12 @@ services:
     container_name: oj-backend
     restart: always
     environment:
-      DB_HOST: ${DB_HOST:-101.42.34.232}
+      DB_HOST: host-machine
       DB_PORT: ${DB_PORT:-3306}
       DB_USER: ${DB_USER:-root}
       DB_PASSWORD: ${DB_PASSWORD:-dsw123456}
       DB_NAME: ${DB_NAME:-onlinepractice}
-      REDIS_HOST: ${REDIS_HOST:-101.42.34.232}
+      REDIS_HOST: host-machine
       REDIS_PORT: ${REDIS_PORT:-6379}
       REDIS_PASSWORD: ${REDIS_PASSWORD:-dsw123456}
       TZ: Asia/Shanghai
