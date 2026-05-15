@@ -19,8 +19,8 @@
             <button class="btn btn-outline" @click="logout">退出</button>
           </template>
           <template v-else>
-            <button class="btn btn-primary" @click="showLoginModal = true">登录</button>
-            <button class="btn btn-outline" @click="showRegisterModal = true">注册</button>
+            <button class="btn btn-primary" @click="router.push('/login')">登录</button>
+            <button class="btn btn-outline" @click="router.push('/register')">注册</button>
           </template>
         </div>
       </div>
@@ -258,40 +258,6 @@
       </div>
     </main>
 
-    <!-- ==================== 登录弹窗 ==================== -->
-    <div v-if="showLoginModal" class="modal-overlay" @click.self="showLoginModal = false">
-      <div class="modal">
-        <div class="modal-header"><h3>登录</h3><button class="btn-close" @click="showLoginModal = false">×</button></div>
-        <form @submit.prevent="doLogin" class="modal-body">
-          <input v-model="loginForm.username" placeholder="用户名" class="input" required />
-          <input v-model="loginForm.password" type="password" placeholder="密码" class="input" required />
-          <div v-if="loginMsg" class="form-msg" :class="{ error: loginError }">{{ loginMsg }}</div>
-          <button type="submit" class="btn btn-primary btn-block" :disabled="loginLoading">{{ loginLoading ? '登录中...' : '登录' }}</button>
-        </form>
-      </div>
-    </div>
-
-    <!-- ==================== 注册弹窗 ==================== -->
-    <div v-if="showRegisterModal" class="modal-overlay" @click.self="showRegisterModal = false">
-      <div class="modal">
-        <div class="modal-header"><h3>注册</h3><button class="btn-close" @click="showRegisterModal = false">×</button></div>
-        <form @submit.prevent="doRegister" class="modal-body">
-          <input v-model="registerForm.name" placeholder="用户名" class="input" required />
-          <input v-model="registerForm.password" type="password" placeholder="密码" class="input" required />
-          <input v-model="registerForm.mail" placeholder="邮箱" class="input" required />
-          <input v-model="registerForm.phone" placeholder="手机号" class="input" required />
-          <div class="code-row">
-            <input v-model="registerForm.code" placeholder="验证码" class="input" required />
-            <button type="button" class="btn btn-outline" @click="doSendCode" :disabled="sendCodeCountdown > 0">
-              {{ sendCodeCountdown > 0 ? sendCodeCountdown + 's' : '发送验证码' }}
-            </button>
-          </div>
-          <div v-if="registerMsg" class="form-msg" :class="{ error: registerError }">{{ registerMsg }}</div>
-          <button type="submit" class="btn btn-primary btn-block" :disabled="registerLoading">{{ registerLoading ? '注册中...' : '注册' }}</button>
-        </form>
-      </div>
-    </div>
-
     <!-- ==================== Toast 通知 ==================== -->
     <transition name="toast-fade">
       <div v-if="toast.show" class="toast" :class="toast.type">{{ toast.msg }}</div>
@@ -300,35 +266,11 @@
 </template>
 
 <script setup>
-import { reactive, ref, computed, watch, onMounted } from 'vue'
-import axios from 'axios'
+import { reactive, ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import api from './api'
 
-// ======================== 配置 ========================
-// 修改此地址为你的后端实际地址
-// 使用 Vite 开发服务器时，proxy 会自动转发，所以留空即可
-const BASE_URL = ''
-
-const api = axios.create({
-  baseURL: BASE_URL,
-  timeout: 30000,
-  headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-})
-
-// 请求拦截器 — 自动附带 JWT token
-api.interceptors.request.use(config => {
-  const t = localStorage.getItem('oj_token')
-  if (t) config.headers.Authorization = t
-  return config
-})
-
-// 响应拦截器 — 统一错误处理
-api.interceptors.response.use(
-  res => res,
-  err => {
-    showToast('网络异常，请检查后端服务是否启动', 'error')
-    return Promise.reject(err)
-  }
-)
+const router = useRouter()
 
 // ======================== 全局状态 ========================
 const currentView = ref('problems')
@@ -354,74 +296,11 @@ function switchView(v) {
   else if (v === 'admin') { fetchCategories(); fetchAllCategories() }
 }
 
-// ======================== 登录/注册逻辑 ========================
-const showLoginModal = ref(false)
-const showRegisterModal = ref(false)
-const loginLoading = ref(false)
-const loginMsg = ref('')
-const loginError = ref(false)
-const loginForm = reactive({ username: '', password: '' })
-const registerLoading = ref(false)
-const registerMsg = ref('')
-const registerError = ref(false)
-const registerForm = reactive({ name: '', password: '', mail: '', phone: '', code: '' })
-const sendCodeCountdown = ref(0)
-
-function doLogin() {
-  loginLoading.value = true; loginMsg.value = ''; loginError.value = false
-  const fd = new URLSearchParams()
-  fd.append('username', loginForm.username); fd.append('password', loginForm.password)
-  api.post('/login', fd).then(res => {
-    const d = res.data
-    if (d.code === 200) {
-      token.value = d.data.token; userName.value = loginForm.username; isAdmin.value = d.data.isAdimin === 1
-      localStorage.setItem('oj_token', d.data.token); localStorage.setItem('oj_name', loginForm.username); localStorage.setItem('oj_admin', d.data.isAdimin)
-      showLoginModal.value = false; loginForm.username = ''; loginForm.password = ''
-      showToast('登录成功', 'success')
-    } else {
-      loginMsg.value = d.msg || '登录失败'; loginError.value = true
-    }
-  }).catch(() => { loginMsg.value = '请求失败'; loginError.value = true }).finally(() => { loginLoading.value = false })
-}
-
+// ======================== 登出 ========================
 function logout() {
   token.value = ''; userName.value = ''; isAdmin.value = false
   localStorage.removeItem('oj_token'); localStorage.removeItem('oj_name'); localStorage.removeItem('oj_admin')
-  currentView.value = 'problems'; showToast('已退出登录')
-}
-
-function doSendCode() {
-  if (!registerForm.mail) { registerMsg.value = '请先输入邮箱'; registerError.value = true; return }
-  const fd = new URLSearchParams(); fd.append('mail', registerForm.mail)
-  api.post('/sendcode', fd).then(res => {
-    const d = res.data
-    if (d.code === 200) {
-      showToast('验证码已发送', 'success')
-      sendCodeCountdown.value = 60
-      const t = setInterval(() => { sendCodeCountdown.value--; if (sendCodeCountdown.value <= 0) clearInterval(t) }, 1000)
-    } else {
-      registerMsg.value = d.msg || '发送失败'; registerError.value = true
-    }
-  })
-}
-
-function doRegister() {
-  registerLoading.value = true; registerMsg.value = ''; registerError.value = false
-  const fd = new URLSearchParams()
-  fd.append('name', registerForm.name); fd.append('password', registerForm.password)
-  fd.append('mail', registerForm.mail); fd.append('phone', registerForm.phone); fd.append('code', registerForm.code)
-  api.post('/register', fd).then(res => {
-    const d = res.data
-    if (d.code === 200) {
-      token.value = d.data.token; userName.value = registerForm.name; isAdmin.value = false
-      localStorage.setItem('oj_token', d.data.token); localStorage.setItem('oj_name', registerForm.name); localStorage.setItem('oj_admin', '0')
-      showRegisterModal.value = false
-      Object.assign(registerForm, { name: '', password: '', mail: '', phone: '', code: '' })
-      showToast('注册成功', 'success')
-    } else {
-      registerMsg.value = d.msg || '注册失败'; registerError.value = true
-    }
-  }).catch(() => { registerMsg.value = '请求失败'; registerError.value = true }).finally(() => { registerLoading.value = false })
+  router.push('/login')
 }
 
 // ======================== 题库 ========================
@@ -561,7 +440,7 @@ function fetchCategories() {
 
 function fetchAllCategories() {
   api.get('/admin/category-list', { params: { page: 1, size: 999 } }).then(res => {
-    if (res.data.code === 200) allCategories.value = res.data.list
+    if (res.data.code === 200) allCategories.value = res.data.data.list
   })
 }
 
@@ -641,7 +520,7 @@ function saveProblem() {
 
 function fetchAdminProblems() {
   api.get('/problem-list', { params: { page: 1, size: 50, keyword: problemSearch2.keyword } }).then(res => {
-    if (res.data.code === 200) adminProblems.value = res.data.list
+    if (res.data.code === 200) adminProblems.value = res.data.data.list
   })
 }
 
@@ -664,10 +543,12 @@ function loadProblemForEdit(identity) {
 // ======================== 初始化 ========================
 onMounted(() => {
   fetchProblems()
-  // 预加载分类列表
-  api.get('/admin/category-list', { params: { page: 1, size: 999 } }).then(res => {
-    if (res.data.code === 200) categories.value = res.data.list
-  }).catch(() => {})
+  // 预加载分类列表（仅管理员可用，普通用户静默失败）
+  if (isAdmin.value) {
+    api.get('/admin/category-list', { params: { page: 1, size: 999 } }).then(res => {
+      if (res.data.code === 200) categories.value = res.data.data.list
+    }).catch(() => {})
+  }
 })
 </script>
 
@@ -812,24 +693,6 @@ body { background: var(--bg); font-family: var(--font); color: var(--text); -web
   vertical-align: middle; margin-right: 8px;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
-
-/* ======================== Modal ======================== */
-.modal-overlay {
-  position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex;
-  align-items: center; justify-content: center; z-index: 200; animation: fadeIn .2s;
-}
-@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-.modal {
-  background: var(--surface); border-radius: 12px; box-shadow: var(--shadow-lg);
-  width: 420px; max-width: 90vw; animation: slideUp .25s ease-out;
-}
-@keyframes slideUp { from { transform: translateY(24px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-.modal-header { display: flex; justify-content: space-between; align-items: center; padding: 20px 24px; border-bottom: 1px solid var(--border); }
-.modal-header h3 { font-size: 18px; }
-.modal-body { padding: 24px; display: flex; flex-direction: column; gap: 16px; }
-.code-row { display: flex; gap: 12px; }
-.code-row .input { flex: 1; }
-.code-row .btn { white-space: nowrap; }
 
 /* ======================== Detail Page ======================== */
 .detail-layout { display: grid; grid-template-columns: 1fr 400px; gap: 24px; align-items: start; }
