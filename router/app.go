@@ -40,7 +40,7 @@ func Router() *gin.Engine {
 	//r.Group("/admin", middleware.AuthAdiminCheck())
 	admin := r.Group("/admin", middleware.AuthAdiminCheck())
 	{
-		admin.POST("/problem-create", service.GreateProblem)
+		admin.POST("/problem-create", service.CreateProblem)
 		admin.GET("/category-list", service.GetCategoryList)
 		admin.POST("/category-create", service.CreateCategory)
 		admin.DELETE("/category-delete", service.DeleteCategory)

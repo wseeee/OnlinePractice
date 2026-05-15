@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS user_basic (
     deleted_at  DATETIME(3)       DEFAULT NULL,
     identity    VARCHAR(36)       NOT NULL DEFAULT '',
     name        VARCHAR(100)      NOT NULL DEFAULT '',
-    password    VARCHAR(32)       NOT NULL DEFAULT '',
+    password    VARCHAR(60)       NOT NULL DEFAULT '',
     phone       CHAR(11)          NOT NULL DEFAULT '',
     mail        VARCHAR(100)      NOT NULL DEFAULT '',
     pass_num    INT(11)           NOT NULL DEFAULT 0,

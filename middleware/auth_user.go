@@ -15,7 +15,7 @@ func AuthUserCheck() gin.HandlerFunc {
 			c.Abort()
 			c.JSON(200, gin.H{
 				"code": -1,
-				"msg":  "Authorization Userization",
+				"msg":  "未授权访问",
 			})
 			return
 		}
@@ -23,7 +23,7 @@ func AuthUserCheck() gin.HandlerFunc {
 			c.Abort()
 			c.JSON(200, gin.H{
 				"code": -1,
-				"msg":  "Userization User",
+				"msg":  "管理员请使用管理端",
 			})
 			return
 		}

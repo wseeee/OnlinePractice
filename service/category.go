@@ -37,8 +37,8 @@ func GetCategoryList(c *gin.Context) {
 	keyword := c.Query("keyword")
 	categorylist := make([]*Models.CategoryBasic, 0)
 	err = Models.GetCategoryList(keyword).
-		Offset(page).Limit(size).
-		Count(&count).Find(&categorylist).Error
+		Count(&count).Offset(page).Limit(size).
+		Find(&categorylist).Error
 	if err != nil {
 		log.Printf("Failed to get category list: %v", err)
 		return

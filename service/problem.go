@@ -5,7 +5,7 @@ import (
 	"OnlinePrictice/Models"
 	"OnlinePrictice/define"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"log"
 	"strconv"
 
@@ -83,7 +83,7 @@ func GetProblemDetail(c *gin.Context) {
 		}
 		c.JSON(200, gin.H{
 			"code": -1,
-			"msg":  "系统错误",
+			"msg":  "查询失败",
 		})
 		return
 	}
@@ -93,7 +93,7 @@ func GetProblemDetail(c *gin.Context) {
 	})
 }
 
-// GreateProblem
+// CreateProblem
 // @Tags 管理员私有方法
 // @Summary 创建问题
 // @Param Authorization header string true "Authorization"
@@ -105,14 +105,13 @@ func GetProblemDetail(c *gin.Context) {
 // @Param max_runtime formData int false  "max_runtime"
 // @Success 200 {string} json "{"code":"200","data":""}"
 // @Router /admin/problem-create [post]
-func GreateProblem(c *gin.Context) {
+func CreateProblem(c *gin.Context) {
 	title := c.PostForm("title")
 	content := c.PostForm("content")
 	maxRuntime, _ := strconv.Atoi(c.PostForm("max_runtime"))
 	maxMem, _ := strconv.Atoi(c.PostForm("max_mem"))
 	categoryIds := c.PostFormArray("category_ids")
 	testCases := c.PostFormArray("test_cases")
-	//{"input":"3 4\n","output":"7\n"}
 	if title == "" || content == "" || len(categoryIds) == 0 || len(testCases) == 0 || maxRuntime == 0 || maxMem == 0 {
 		c.JSON(200, gin.H{
 			"code": -1,
@@ -139,46 +138,21 @@ func GreateProblem(c *gin.Context) {
 	}
 	data.ProblemCategories = categoryBasics
 	//处理测试用例
-	testCaseBasics := make([]*Models.TestCase, 0)
-	for _, testCase := range testCases {
-		caseMap := make(map[string]string)
-		err := json.Unmarshal([]byte(testCase), &caseMap)
-		if err != nil {
-			c.JSON(200, gin.H{
-				"code": -1,
-				"msg":  "参数错误",
-			})
-			return
-		}
-		if _, ok := caseMap["input"]; !ok {
-			c.JSON(200, gin.H{
-				"code": -1,
-				"msg":  "输入错误",
-			})
-			return
-		}
-		if _, ok := caseMap["output"]; !ok {
-			c.JSON(200, gin.H{
-				"code": -1,
-				"msg":  "输出错误",
-			})
-			return
-		}
-		testCaseBasic := &Models.TestCase{
-			Identity:        Helper.GetUUID(),
-			ProblemIdentity: identity,
-			Input:           caseMap["input"],
-			Output:          caseMap["output"],
-		}
-		testCaseBasics = append(testCaseBasics, testCaseBasic)
-	}
-	data.TestCases = testCaseBasics
-
-	err := Models.CreateProblem(data).Error
+	testCaseBasics, err := parseTestCases(testCases, identity)
 	if err != nil {
 		c.JSON(200, gin.H{
 			"code": -1,
-			"msg":  "系统错误",
+			"msg":  err.Error(),
+		})
+		return
+	}
+	data.TestCases = testCaseBasics
+
+	err = Models.CreateProblem(data).Error
+	if err != nil {
+		c.JSON(200, gin.H{
+			"code": -1,
+			"msg":  "创建失败",
 		})
 		return
 	}
@@ -204,8 +178,6 @@ func GreateProblem(c *gin.Context) {
 // @Success 200 {string} json "{"code":"200","data":""}"
 // @Router /admin/problem-update [put]
 func UpdateProblem(c *gin.Context) {
-	fmt.Println("========== 进入 UpdateProblem 函数 ==========")
-
 	identity := c.Query("identity")
 	title := c.PostForm("title")
 	content := c.PostForm("content")
@@ -221,9 +193,18 @@ func UpdateProblem(c *gin.Context) {
 		return
 	}
 
-	err := Models.DB.Transaction(func(tx *gorm.DB) error {
-		//问题基础信息的保存problem_basic
+	// 先解析测试用例，在事务外返回参数错误
+	testCaseBasics, err := parseTestCases(testCases, identity)
+	if err != nil {
+		c.JSON(200, gin.H{
+			"code": -1,
+			"msg":  err.Error(),
+		})
+		return
+	}
 
+	err = Models.DB.Transaction(func(tx *gorm.DB) error {
+		//问题基础信息的保存problem_basic
 		problemBasic := &Models.ProblemBasic{
 			Identity:   identity,
 			Title:      title,
@@ -235,17 +216,17 @@ func UpdateProblem(c *gin.Context) {
 			Where("identity = ?", identity).
 			Updates(problemBasic).Error
 		if err != nil {
-			return err
+			return errors.New("题目信息更新失败")
 		}
 		//查询问题详情
 		err = tx.Where("identity = ?", identity).First(&problemBasic).Error
 		if err != nil {
-			return err
+			return errors.New("题目查询失败")
 		}
 		//关联问题分类的更新
 		err = tx.Where("problem_id = ?", problemBasic.ID).Delete(&Models.ProblemCategory{}).Error
 		if err != nil {
-			return err
+			return errors.New("分类关联删除失败")
 		}
 		categoryBasics := make([]*Models.ProblemCategory, 0)
 		for _, id := range categoryIds {
@@ -257,56 +238,25 @@ func UpdateProblem(c *gin.Context) {
 		}
 		err = tx.Create(&categoryBasics).Error
 		if err != nil {
-			return err
+			return errors.New("分类关联创建失败")
 		}
 		//关联测试用例的更新
 		err = tx.Where("problem_identity = ?", identity).Delete(&Models.TestCase{}).Error
 		if err != nil {
-			return err
+			return errors.New("测试用例删除失败")
 		}
-		testCaseBasics := make([]*Models.TestCase, 0)
 
-		for _, testCase := range testCases {
-			caseMap := make(map[string]string)
-			err := json.Unmarshal([]byte(testCase), &caseMap)
-
-			if err != nil {
-				c.JSON(200, gin.H{
-					"code": -1,
-					"msg":  "参数错误",
-				})
-				return err
-			}
-			if _, ok := caseMap["input"]; !ok {
-				c.JSON(200, gin.H{
-					"code": -1,
-					"msg":  "输入错误",
-				})
-				return err
-			}
-			if _, ok := caseMap["output"]; !ok {
-				c.JSON(200, gin.H{
-					"code": -1,
-					"msg":  "输出错误",
-				})
-				return err
-			}
-			testCaseBasic := &Models.TestCase{
-				Identity:        Helper.GetUUID(),
-				ProblemIdentity: identity,
-				Input:           caseMap["input"],
-				Output:          caseMap["output"],
-			}
-			testCaseBasics = append(testCaseBasics, testCaseBasic)
-		}
 		err = tx.Create(&testCaseBasics).Error
+		if err != nil {
+			return errors.New("测试用例创建失败")
+		}
 
 		return nil
 	})
 	if err != nil {
 		c.JSON(200, gin.H{
 			"code": -1,
-			"msg":  "Problemupdate error",
+			"msg":  "更新失败，请稍后重试",
 		})
 		return
 	}
@@ -315,3 +265,29 @@ func UpdateProblem(c *gin.Context) {
 		"msg":  "修改成功",
 	})
 }
+
+// parseTestCases 解析测试用例 JSON 数组
+func parseTestCases(testCases []string, problemIdentity string) ([]*Models.TestCase, error) {
+	testCaseBasics := make([]*Models.TestCase, 0, len(testCases))
+	for _, testCase := range testCases {
+		caseMap := make(map[string]string)
+		err := json.Unmarshal([]byte(testCase), &caseMap)
+		if err != nil {
+			return nil, errors.New("测试用例格式错误")
+		}
+		if _, ok := caseMap["input"]; !ok {
+			return nil, errors.New("测试用例缺少 input 字段")
+		}
+		if _, ok := caseMap["output"]; !ok {
+			return nil, errors.New("测试用例缺少 output 字段")
+		}
+		testCaseBasics = append(testCaseBasics, &Models.TestCase{
+			Identity:        Helper.GetUUID(),
+			ProblemIdentity: problemIdentity,
+			Input:           caseMap["input"],
+			Output:          caseMap["output"],
+		})
+	}
+	return testCaseBasics, nil
+}
+

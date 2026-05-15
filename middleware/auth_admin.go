@@ -15,7 +15,7 @@ func AuthAdiminCheck() gin.HandlerFunc {
 			c.Abort()
 			c.JSON(200, gin.H{
 				"code": -1,
-				"msg":  "UnAuthorized Authorization",
+				"msg":  "未授权访问",
 			})
 			return
 		}
@@ -23,10 +23,11 @@ func AuthAdiminCheck() gin.HandlerFunc {
 			c.Abort()
 			c.JSON(200, gin.H{
 				"code": -1,
-				"msg":  "UnAuthorized Admin",
+				"msg":  "无管理员权限",
 			})
 			return
 		}
+		c.Set("user_claims", userClaim)
 		c.Next()
 	}
 }

@@ -1,6 +1,8 @@
 package Models
 
 import (
+	"strings"
+
 	"gorm.io/gorm"
 )
 
@@ -22,12 +24,17 @@ func (table *ProblemBasic) TableName() string {
 }
 
 func GetProblemList(keyword string, categoryIdentity string) *gorm.DB {
+	// 转义 LIKE 通配符防止注入
+	escaped := keyword
+	escaped = strings.ReplaceAll(escaped, "\\", "\\\\")
+	escaped = strings.ReplaceAll(escaped, "%", "\\%")
+	escaped = strings.ReplaceAll(escaped, "_", "\\_")
 
 	tx := DB.Model(new(ProblemBasic)).
 		Preload("ProblemCategories").
 		Preload("ProblemCategories.CategoryBasic").
 		Where("title like ? OR content like ?",
-			"%"+keyword+"%", "%"+keyword+"%")
+			"%"+escaped+"%", "%"+escaped+"%")
 	if categoryIdentity != "" {
 		tx = tx.Joins("RIGHT JOIN problem_category pc on pc.problem_id=problem_basic.id").
 			Where("pc.category_id = ("+
@@ -42,6 +49,7 @@ func GetProblemDetail(identity string) *gorm.DB {
 	return DB.Model(new(ProblemBasic)).
 		Preload("ProblemCategories").
 		Preload("ProblemCategories.CategoryBasic").
+		Preload("TestCases").
 		Where("identity = ?", identity)
 }
 

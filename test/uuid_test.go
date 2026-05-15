@@ -1,13 +1,12 @@
 package test
 
 import (
+	"OnlinePrictice/Helper"
 	"fmt"
 	"testing"
-
-	uuid "github.com/satori/go.uuid"
 )
 
 func TestUUID(t *testing.T) {
-	s := uuid.NewV4().String()
+	s := Helper.GetUUID()
 	fmt.Println(s, len(s))
 }

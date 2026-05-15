@@ -40,7 +40,7 @@ func GetUserBasic(c *gin.Context) {
 		}
 		c.JSON(200, gin.H{
 			"code": -1,
-			"msg":  "用户故障",
+			"msg":  "查询失败",
 		})
 		return
 	}
@@ -63,16 +63,14 @@ func Login(c *gin.Context) {
 	if username == "" || password == "" {
 		c.JSON(200, gin.H{
 			"code": -1,
-			"msg":  "必填信息为空",
+			"msg":  "必填信息不能为空",
 		})
 		return
 	}
-	password = Helper.Md5(password)
-	data := new(Models.UserBasic)
-	data.Name = username
-	data.Password = password
 
-	err := Models.UserLogin(data).First(&data).Error
+	// 先按用户名查询用户
+	data := new(Models.UserBasic)
+	err := Models.DB.Where("name = ?", username).First(data).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(200, gin.H{
@@ -83,9 +81,24 @@ func Login(c *gin.Context) {
 		}
 		c.JSON(200, gin.H{
 			"code": -1,
-			"msg":  "用户故障",
+			"msg":  "查询失败",
 		})
 		return
+	}
+
+	// 验证密码（兼容 bcrypt 和旧的 MD5）
+	if !Helper.CheckPassword(password, data.Password) {
+		// 兼容旧密码: 尝试 MD5 比对
+		if data.Password != Helper.Md5(password) {
+			c.JSON(200, gin.H{
+				"code": -1,
+				"msg":  "用户名或者密码错误",
+			})
+			return
+		}
+		// 旧密码匹配，自动升级为 bcrypt
+		newHash, _ := Helper.HashPassword(password)
+		Models.DB.Model(data).Update("password", newHash)
 	}
 
 	token, err := Helper.GenerateToken(data.Identity, data.Name, data.IsAdmin)
@@ -99,8 +112,8 @@ func Login(c *gin.Context) {
 	c.JSON(200, gin.H{
 		"code": 200,
 		"data": map[string]interface{}{
-			"token":    token,
-			"isAdimin": data.IsAdmin,
+			"token":   token,
+			"isAdmin": data.IsAdmin,
 		},
 	})
 }
@@ -124,6 +137,7 @@ func SendCode(c *gin.Context) {
 	Models.RDB.Set(define.CTX, mail, code, time.Second*300)
 	err := Helper.SendEmail(mail, code)
 	if err != nil {
+		log.Printf("发送邮件失败: %v", err)
 		c.JSON(200, gin.H{
 			"code": -1,
 			"msg":  "发送邮件失败",
@@ -155,7 +169,7 @@ func Register(c *gin.Context) {
 	if name == "" || password == "" || mail == "" || phone == "" || code == "" {
 		c.JSON(200, gin.H{
 			"code": -1,
-			"msg":  "必填信息不为空",
+			"msg":  "必填信息不能为空",
 		})
 		return
 	}
@@ -163,7 +177,7 @@ func Register(c *gin.Context) {
 	//验证码是否正确
 	GetCode, err := Models.RDB.Get(define.CTX, mail).Result()
 	if err != nil {
-		log.Print("获取验证码失败")
+		log.Printf("获取验证码失败: %v", err)
 		c.JSON(200, gin.H{
 			"code": -1,
 			"msg":  "验证码已过期",
@@ -197,7 +211,15 @@ func Register(c *gin.Context) {
 	//数据的插入
 	user := new(Models.UserBasic)
 	user.Name = name
-	user.Password = Helper.Md5(password)
+	hashedPwd, err := Helper.HashPassword(password)
+	if err != nil {
+		c.JSON(200, gin.H{
+			"code": -1,
+			"msg":  "密码处理失败",
+		})
+		return
+	}
+	user.Password = hashedPwd
 	user.Identity = Helper.GetUUID()
 	user.Mail = mail
 	user.Phone = phone
@@ -217,6 +239,7 @@ func Register(c *gin.Context) {
 			"code": -1,
 			"msg":  "生成token出错",
 		})
+		return
 	}
 	c.JSON(200, gin.H{
 		"code": 200,
@@ -247,8 +270,8 @@ func GetRankList(c *gin.Context) {
 	page = (page - 1) * size
 	var count int64
 	list := make([]*Models.UserBasic, 0)
-	err = Models.GetRankList().Find(&list).Count(&count).
-		Offset(page).Limit(size).Error
+	// 先 Count 再分页查询
+	err = Models.GetRankList().Count(&count).Offset(page).Limit(size).Find(&list).Error
 	if err != nil {
 		c.JSON(200, gin.H{
 			"code": -1,
@@ -263,5 +286,4 @@ func GetRankList(c *gin.Context) {
 			"list":  list,
 		},
 	})
-
 }
