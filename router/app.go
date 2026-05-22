@@ -28,12 +28,19 @@ func Router() *gin.Engine {
 	r.GET("/rank-list", service.GetRankList)
 	//提交记录
 	r.GET("/submit-list", service.GetSubmitList)
+	//比赛
+	r.GET("/contest-list", service.GetContestListPublic)
+	r.GET("/contest-detail", service.GetContestDetailPublic)
+	r.GET("/contest-rank", service.GetContestRank)
 
 	//用户私有方法
 	//代码的提交判断
 	user := r.Group("/user", middleware.AuthUserCheck())
 	{
 		user.POST("/code-submit", service.CodeSubmit)
+		user.POST("/contest-join", service.ContestJoin)
+		user.POST("/contest-submit", service.ContestSubmit)
+		user.GET("/contest-submits", service.GetUserContestSubmits)
 	}
 
 	//管理员私有方法
@@ -46,6 +53,10 @@ func Router() *gin.Engine {
 		admin.DELETE("/category-delete", service.DeleteCategory)
 		admin.PUT("/category-update", service.UpdateCategory)
 		admin.PUT("/problem-update", service.UpdateProblem)
+		admin.POST("/contest-create", service.CreateContest)
+		admin.PUT("/contest-update", service.UpdateContest)
+		admin.GET("/contest-list", service.GetContestList)
+		admin.DELETE("/contest-delete", service.DeleteContest)
 	}
 
 	return r
