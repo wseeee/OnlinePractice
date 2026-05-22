@@ -10,6 +10,7 @@
         <nav class="header-nav">
           <a :class="{ active: currentView === 'problems' }" @click="switchView('problems')">题库</a>
           <a :class="{ active: currentView === 'rank' }" @click="switchView('rank')">排行榜</a>
+          <a :class="{ active: currentView === 'contest' }" @click="switchView('contest')">比赛</a>
           <a :class="{ active: currentView === 'submit' }" @click="switchView('submit')">提交记录</a>
           <a v-if="isAdmin" :class="{ active: currentView === 'admin' }" @click="switchView('admin')">管理</a>
         </nav>
@@ -63,6 +64,121 @@
               <button :disabled="problemPage <= 1" @click="problemPage--; fetchProblems()">上一页</button>
               <span>第 {{ problemPage }} 页 / 共 {{ Math.ceil(problemTotal / problemSize) || 1 }} 页</span>
               <button :disabled="problemPage >= Math.ceil(problemTotal / problemSize)" @click="problemPage++; fetchProblems()">下一页</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===== 比赛列表页 ===== -->
+        <section v-if="currentView === 'contest'" class="view-problems">
+          <div class="page-header">
+            <h2>比赛</h2>
+            <p class="subtitle">参加比赛，挑战自我</p>
+          </div>
+          <div v-if="contestLoading" class="state-box"><span class="spinner"></span> 加载中...</div>
+          <div v-else-if="contestError" class="state-box error">{{ contestError }}</div>
+          <div v-else-if="contests.length === 0" class="state-box empty">暂无比赛</div>
+          <div v-else class="problem-table-wrap">
+            <table class="data-table">
+              <thead><tr><th>比赛</th><th>开始时间</th><th>结束时间</th><th>状态</th><th>参赛人数</th></tr></thead>
+              <tbody>
+                <tr v-for="c in contests" :key="c.identity" @click="openContestDetail(c)" class="clickable">
+                  <td>{{ c.title }}</td>
+                  <td>{{ formatTime(c.start_at) }}</td>
+                  <td>{{ formatTime(c.end_at) }}</td>
+                  <td><span class="status-badge" :class="contestStatusClass(c.contest_status)">{{ contestStatusText(c.contest_status) }}</span></td>
+                  <td>{{ c.participant_count }}</td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="pagination">
+              <button :disabled="contestPage <= 1" @click="contestPage--; fetchContests()">上一页</button>
+              <span>第 {{ contestPage }} 页 / 共 {{ Math.ceil(contestTotal / contestSize) || 1 }} 页</span>
+              <button :disabled="contestPage >= Math.ceil(contestTotal / contestSize)" @click="contestPage++; fetchContests()">下一页</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===== 比赛详情页 ===== -->
+        <section v-if="currentView === 'contest-detail'" class="view-detail">
+          <button class="btn btn-text" @click="currentView = 'contest'; fetchContests()">← 返回比赛列表</button>
+          <div v-if="contestDetailLoading" class="state-box"><span class="spinner"></span> 加载中...</div>
+          <div v-else-if="contestDetailError" class="state-box error">{{ contestDetailError }}</div>
+          <div v-else class="detail-layout">
+            <div class="detail-left">
+              <h2>{{ contestDetail.contest.title }}</h2>
+              <div class="detail-meta">
+                <span>开始: {{ formatTime(contestDetail.contest.start_at) }}</span>
+                <span>结束: {{ formatTime(contestDetail.contest.end_at) }}</span>
+                <span>参赛人数: {{ contestDetail.participant_count }}</span>
+                <span class="status-badge" :class="contestStatusClass(contestDetail.status)">{{ contestStatusText(contestDetail.status) }}</span>
+              </div>
+              <div v-if="contestDetail.contest.description" class="detail-content" style="margin-top:16px">
+                <pre>{{ contestDetail.contest.description }}</pre>
+              </div>
+              <h3 style="margin-top:24px">题目列表</h3>
+              <table class="data-table" style="margin-top:8px">
+                <thead><tr><th>#</th><th>题目</th><th>满分</th><th>我的得分</th></tr></thead>
+                <tbody>
+                  <tr v-for="(cp, idx) in contestDetail.contest.contest_problems" :key="cp.id"
+                      @click="openContestProblem(cp)" :class="{ clickable: true, 'selected-row': selectedContestProblem?.problem_identity === cp.problem_identity }">
+                    <td>{{ idx + 1 }}</td>
+                    <td>{{ cp.problem_basic ? cp.problem_basic.title : cp.problem_identity }}</td>
+                    <td>{{ cp.score }}</td>
+                    <td>{{ contestMyScores[cp.problem_identity] ?? '-' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <div v-if="contestDetail.contest.contest_type === 2 && contestDetail.status === 0" style="margin-top:16px">
+                <button class="btn btn-primary" @click="joinContest" :disabled="contestJoining">
+                  {{ contestJoining ? '报名中...' : '报名参加' }}
+                </button>
+                <span v-if="contestJoinMsg" style="margin-left:8px; font-size:14px">{{ contestJoinMsg }}</span>
+              </div>
+            </div>
+            <div class="detail-right">
+              <div class="right-tabs">
+                <a :class="{ active: contestTab === 'submit' }" @click="contestTab = 'submit'">我的提交</a>
+                <a :class="{ active: contestTab === 'rank' }" @click="contestTab = 'rank'; fetchContestRank()">排行榜</a>
+              </div>
+              <div v-if="contestTab === 'submit'">
+                <div v-if="selectedContestProblem" style="margin-bottom:8px; font-size:14px">
+                  <strong>当前题目：</strong>{{ selectedContestProblem.problem_basic?.title }}
+                </div>
+                <textarea v-model="contestCode" class="code-editor" placeholder="在此编写 Go 代码..." rows="12"></textarea>
+                <div style="margin-top:8px; display:flex; gap:8px">
+                  <button class="btn btn-primary" @click="submitContestCode" :disabled="contestSubmitting || !selectedContestProblem">
+                    {{ contestSubmitting ? '提交中...' : '提交代码' }}
+                  </button>
+                  <span v-if="contestSubmitMsg" :style="{ color: contestSubmitColor, fontSize: '14px', alignSelf: 'center' }">{{ contestSubmitMsg }}</span>
+                </div>
+                <div v-if="contestSubmits.length > 0" style="margin-top:16px">
+                  <table class="data-table">
+                    <thead><tr><th>题目</th><th>得分</th><th>状态</th><th>时间</th></tr></thead>
+                    <tbody>
+                      <tr v-for="s in contestSubmits" :key="s.id">
+                        <td>{{ s.problem_basic?.title ?? s.problem_identity }}</td>
+                        <td>{{ s.score }}</td>
+                        <td><span class="status-tag" :class="statusClass(s.status)">{{ statusLabel(s.status) }}</span></td>
+                        <td>{{ formatTime(s.created_at) }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div v-if="contestTab === 'rank'">
+                <div v-if="contestRankLoading" class="state-box"><span class="spinner"></span> 加载中...</div>
+                <div v-else-if="contestRanks.length === 0" class="state-box empty">暂无排名数据</div>
+                <table v-else class="data-table">
+                  <thead><tr><th>排名</th><th>用户</th><th>总分</th></tr></thead>
+                  <tbody>
+                    <tr v-for="(r, idx) in contestRanks" :key="r.user_identity">
+                      <td><span class="rank-badge" :class="'rank-' + (idx + 1)">{{ idx + 1 }}</span></td>
+                      <td>{{ r.user_name }}</td>
+                      <td>{{ r.total_score }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </section>
@@ -169,6 +285,7 @@
           <div class="admin-tabs">
             <button :class="{ active: adminTab === 'categories' }" @click="adminTab = 'categories'">分类管理</button>
             <button :class="{ active: adminTab === 'problem-create' }" @click="adminTab = 'problem-create'">新建题目</button>
+            <button :class="{ active: adminTab === 'contest-admin' }" @click="adminTab = 'contest-admin'; fetchAdminContests()">比赛管理</button>
           </div>
 
           <!-- 分类管理 -->
@@ -253,6 +370,72 @@
               </tbody>
             </table>
           </div>
+
+          <!-- 比赛管理 -->
+          <div v-if="adminTab === 'contest-admin'" class="admin-section">
+            <div class="search-bar">
+              <button class="btn btn-success" @click="showContestForm = !showContestForm; editingContest = null; resetContestForm()">
+                {{ showContestForm ? '取消' : '新建比赛' }}
+              </button>
+            </div>
+            <div v-if="showContestForm" class="form-card">
+              <h4>{{ editingContest ? '编辑比赛' : '新建比赛' }}</h4>
+              <input v-model="contestForm.title" placeholder="比赛标题" class="input" />
+              <textarea v-model="contestForm.description" placeholder="比赛描述" class="input textarea"></textarea>
+              <div class="form-row">
+                <div>
+                  <label style="font-size:13px; color:var(--text-secondary)">开始时间</label>
+                  <input v-model="contestForm.start_at" type="datetime-local" class="input" />
+                </div>
+                <div>
+                  <label style="font-size:13px; color:var(--text-secondary)">结束时间</label>
+                  <input v-model="contestForm.end_at" type="datetime-local" class="input" />
+                </div>
+              </div>
+              <div class="form-row">
+                <div>
+                  <label style="font-size:13px; color:var(--text-secondary)">比赛类型</label>
+                  <select v-model="contestForm.contest_type" class="input select">
+                    <option :value="1">公开比赛</option>
+                    <option :value="2">报名制</option>
+                  </select>
+                </div>
+                <div v-if="contestForm.contest_type === 2">
+                  <label style="font-size:13px; color:var(--text-secondary)">人数上限 (0=不限)</label>
+                  <input v-model.number="contestForm.max_participants" type="number" class="input" />
+                </div>
+              </div>
+              <div class="form-group">
+                <label>选择题目</label>
+                <div class="checkbox-group">
+                  <label v-for="p in allProblemsForContest" :key="p.identity" class="checkbox-label">
+                    <input type="checkbox" :value="p.identity" v-model="contestForm.problem_identities" /> {{ p.title }}
+                  </label>
+                </div>
+              </div>
+              <div class="form-actions">
+                <button class="btn btn-primary" @click="saveContest" :disabled="contestSaving">
+                  {{ contestSaving ? '保存中...' : editingContest ? '更新比赛' : '创建比赛' }}
+                </button>
+              </div>
+              <div v-if="contestFormMsg" class="form-msg" :class="{ error: contestFormError }">{{ contestFormMsg }}</div>
+            </div>
+            <div v-if="adminContestLoading" class="state-box"><span class="spinner"></span> 加载中...</div>
+            <table v-else-if="adminContests.length" class="data-table">
+              <thead><tr><th>标题</th><th>类型</th><th>开始时间</th><th>操作</th></tr></thead>
+              <tbody>
+                <tr v-for="c in adminContests" :key="c.identity">
+                  <td>{{ c.title }}</td>
+                  <td>{{ c.contest_type === 1 ? '公开' : '报名制' }}</td>
+                  <td>{{ formatTime(c.start_at) }}</td>
+                  <td>
+                    <button class="btn btn-sm btn-outline" @click="loadContestForEdit(c)">编辑</button>
+                    <button class="btn btn-sm btn-danger" @click="deleteContest(c.identity)">删除</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </section>
 
       </div>
@@ -293,6 +476,7 @@ function switchView(v) {
   if (v === 'problems') fetchProblems()
   else if (v === 'rank') fetchRank()
   else if (v === 'submit') fetchSubmitList()
+  else if (v === 'contest') fetchContests()
   else if (v === 'admin') { fetchCategories(); fetchAllCategories() }
 }
 
@@ -540,6 +724,216 @@ function loadProblemForEdit(identity) {
   })
 }
 
+// ======================== 比赛列表 ========================
+const contests = ref([])
+const contestTotal = ref(0)
+const contestPage = ref(1)
+const contestSize = ref(20)
+const contestLoading = ref(false)
+const contestError = ref('')
+
+async function fetchContests() {
+  contestLoading.value = true; contestError.value = ''
+  try {
+    const res = await api.get('/contest-list', { params: { page: contestPage.value, size: contestSize.value } })
+    if (res.data.code === 200) { contests.value = res.data.data.list; contestTotal.value = res.data.data.count }
+    else contestError.value = res.data.msg
+  } catch (e) { contestError.value = '网络错误' }
+  finally { contestLoading.value = false }
+}
+
+function contestStatusClass(s) {
+  return { 0: 'status-waiting', 1: 'status-running', 2: 'status-ended' }[s] || ''
+}
+function contestStatusText(s) {
+  return { 0: '未开始', 1: '进行中', 2: '已结束' }[s] || '未知'
+}
+
+// ======================== 比赛详情 ========================
+const contestDetail = ref(null)
+const contestDetailLoading = ref(false)
+const contestDetailError = ref('')
+const contestMyScores = ref({})
+const selectedContestProblem = ref(null)
+const contestCode = ref('')
+const contestSubmitting = ref(false)
+const contestSubmitMsg = ref('')
+const contestSubmitColor = ref('')
+const contestSubmits = ref([])
+const contestTab = ref('submit')
+const contestRanks = ref([])
+const contestRankLoading = ref(false)
+const contestJoining = ref(false)
+const contestJoinMsg = ref('')
+
+async function openContestDetail(c) {
+  currentView.value = 'contest-detail'
+  contestDetailLoading.value = true; contestDetailError.value = ''
+  contestMyScores.value = {}; selectedContestProblem.value = null
+  contestSubmits.value = []; contestRanks.value = []; contestTab.value = 'submit'
+  try {
+    const res = await api.get('/contest-detail', { params: { identity: c.identity } })
+    if (res.data.code === 200) {
+      contestDetail.value = res.data.data
+      const subRes = await api.get('/user/contest-submits', { params: { contest_identity: c.identity, size: 1000 } })
+      if (subRes.data.code === 200) {
+        const scores = {}
+        for (const s of subRes.data.data.list) {
+          const cur = scores[s.problem_identity] ?? 0
+          if (s.score > cur) scores[s.problem_identity] = s.score
+        }
+        contestMyScores.value = scores
+        contestSubmits.value = subRes.data.data.list
+      }
+    } else contestDetailError.value = res.data.msg
+  } catch (e) { contestDetailError.value = '网络错误' }
+  finally { contestDetailLoading.value = false }
+}
+
+function openContestProblem(cp) {
+  selectedContestProblem.value = cp; contestCode.value = ''; contestSubmitMsg.value = ''
+}
+
+async function joinContest() {
+  if (!contestDetail.value) return
+  contestJoining.value = true; contestJoinMsg.value = ''
+  try {
+    const res = await api.post('/user/contest-join', null, { params: { contest_identity: contestDetail.value.contest.identity } })
+    contestJoinMsg.value = res.data.code === 200 ? '报名成功' : res.data.msg
+  } catch (e) { contestJoinMsg.value = '网络错误' }
+  finally { contestJoining.value = false }
+}
+
+async function submitContestCode() {
+  if (!selectedContestProblem.value || !contestCode.value.trim()) return
+  contestSubmitting.value = true; contestSubmitMsg.value = ''
+  try {
+    const res = await api.post('/user/contest-submit', contestCode.value, {
+      params: { contest_identity: contestDetail.value.contest.identity, problem_identity: selectedContestProblem.value.problem_identity },
+      headers: { 'Content-Type': 'text/plain' }
+    })
+    if (res.data.code === 200) {
+      contestSubmitMsg.value = res.data.data.msg + ' (得分: ' + res.data.data.score + ')'
+      contestSubmitColor.value = res.data.data.status === 1 ? 'var(--success)' : 'var(--error)'
+      const subRes = await api.get('/user/contest-submits', { params: { contest_identity: contestDetail.value.contest.identity, size: 1000 } })
+      if (subRes.data.code === 200) {
+        contestSubmits.value = subRes.data.data.list
+        const scores = {}
+        for (const s of subRes.data.data.list) {
+          const cur = scores[s.problem_identity] ?? 0
+          if (s.score > cur) scores[s.problem_identity] = s.score
+        }
+        contestMyScores.value = scores
+      }
+    } else {
+      contestSubmitMsg.value = res.data.msg; contestSubmitColor.value = 'var(--error)'
+    }
+  } catch (e) { contestSubmitMsg.value = '网络错误'; contestSubmitColor.value = 'var(--error)' }
+  finally { contestSubmitting.value = false }
+}
+
+async function fetchContestRank() {
+  if (!contestDetail.value) return
+  contestRankLoading.value = true
+  try {
+    const res = await api.get('/contest-rank', { params: { contest_identity: contestDetail.value.contest.identity, size: 100 } })
+    if (res.data.code === 200) contestRanks.value = res.data.data.list
+  } catch (e) { /* ignore */ }
+  finally { contestRankLoading.value = false }
+}
+
+// ======================== 管理员比赛管理 ========================
+const adminContests = ref([])
+const adminContestLoading = ref(false)
+const showContestForm = ref(false)
+const editingContest = ref(null)
+const contestForm = reactive({
+  title: '', description: '', start_at: '', end_at: '', contest_type: 1, max_participants: 0, problem_identities: []
+})
+const contestSaving = ref(false)
+const contestFormMsg = ref('')
+const contestFormError = ref(false)
+const allProblemsForContest = ref([])
+
+function resetContestForm() {
+  Object.assign(contestForm, { title: '', description: '', start_at: '', end_at: '', contest_type: 1, max_participants: 0, problem_identities: [] })
+  contestFormMsg.value = ''
+}
+
+function formatDateTimeLocal(dt) {
+  if (!dt) return ''
+  const d = new Date(dt)
+  const pad = n => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
+async function fetchAdminContests() {
+  adminContestLoading.value = true
+  try {
+    const res = await api.get('/admin/contest-list', { params: { page: 1, size: 50 } })
+    if (res.data.code === 200) adminContests.value = res.data.data.list
+  } catch (e) { /* ignore */ }
+  finally { adminContestLoading.value = false }
+  // 同时加载题目列表供选择
+  api.get('/problem-list', { params: { page: 1, size: 200 } }).then(res => {
+    if (res.data.code === 200) allProblemsForContest.value = res.data.data.list
+  }).catch(() => {})
+}
+
+async function saveContest() {
+  const f = contestForm
+  if (!f.title || !f.start_at || !f.end_at || !f.problem_identities.length) {
+    contestFormMsg.value = '请填写完整信息'; contestFormError.value = true; return
+  }
+  contestSaving.value = true; contestFormMsg.value = ''; contestFormError.value = false
+  const fd = new URLSearchParams()
+  fd.append('title', f.title); fd.append('description', f.description)
+  fd.append('start_at', formatDateTimeLocal(f.start_at)); fd.append('end_at', formatDateTimeLocal(f.end_at))
+  fd.append('contest_type', f.contest_type); fd.append('max_participants', f.max_participants)
+  fd.append('problem_identities', JSON.stringify(f.problem_identities))
+
+  const req = editingContest.value
+    ? api.put('/admin/contest-update?' + new URLSearchParams({ identity: editingContest.value.identity }), fd)
+    : api.post('/admin/contest-create', fd)
+
+  try {
+    const res = await req
+    if (res.data.code === 200) {
+      showToast(editingContest.value ? '更新成功' : '创建成功', 'success')
+      editingContest.value = null; showContestForm.value = false; resetContestForm(); fetchAdminContests()
+    } else {
+      contestFormMsg.value = res.data.msg || '操作失败'; contestFormError.value = true
+    }
+  } catch (e) { contestFormMsg.value = '请求失败'; contestFormError.value = true }
+  finally { contestSaving.value = false }
+}
+
+async function loadContestForEdit(c) {
+  showContestForm.value = true
+  try {
+    const res = await api.get('/contest-detail', { params: { identity: c.identity } })
+    if (res.data.code === 200) {
+      const d = res.data.data.contest
+      editingContest.value = { identity: d.identity }
+      contestForm.title = d.title; contestForm.description = d.description
+      contestForm.start_at = d.start_at?.replace(' ', 'T').slice(0, 16) || ''
+      contestForm.end_at = d.end_at?.replace(' ', 'T').slice(0, 16) || ''
+      contestForm.contest_type = d.contest_type; contestForm.max_participants = d.max_participants || 0
+      contestForm.problem_identities = (d.contest_problems || []).map(cp => cp.problem_identity)
+      contestFormMsg.value = ''
+    }
+  } catch (e) { /* ignore */ }
+}
+
+async function deleteContest(identity) {
+  if (!confirm('确定删除该比赛？')) return
+  try {
+    const res = await api.delete('/admin/contest-delete', { params: { identity } })
+    if (res.data.code === 200) { showToast('删除成功', 'success'); fetchAdminContests() }
+    else showToast(res.data.msg, 'error')
+  } catch (e) { showToast('删除失败', 'error') }
+}
+
 // ======================== 初始化 ========================
 onMounted(() => {
   fetchProblems()
@@ -760,4 +1154,14 @@ body { background: var(--bg); font-family: var(--font); color: var(--text); -web
 .toast-fade-enter-active { transition: all .3s ease-out; }
 .toast-fade-leave-active { transition: all .25s ease-in; }
 .toast-fade-enter-from, .toast-fade-leave-to { opacity: 0; transform: translateX(-50%) translateY(-12px); }
+
+/* ======================== Contest ======================== */
+.status-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+.status-waiting { background: #e6f7ff; color: #1890ff; }
+.status-running { background: #f6ffed; color: #52c41a; }
+.status-ended { background: #fff1f0; color: #ff4d4f; }
+.right-tabs { display: flex; gap: 12px; margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+.right-tabs a { cursor: pointer; padding: 4px 8px; font-size: 14px; color: var(--text-secondary); transition: all .2s; }
+.right-tabs a.active { border-bottom: 2px solid var(--primary); color: var(--primary); font-weight: 600; }
+.selected-row { background: var(--primary-light) !important; }
 </style>
