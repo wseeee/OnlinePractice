@@ -15,11 +15,37 @@ services:
       REDIS_HOST: host-machine
       REDIS_PORT: ${REDIS_PORT:-6379}
       REDIS_PASSWORD: ${REDIS_PASSWORD:-dsw123456}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+      JUDGE_WORKERS: ${JUDGE_WORKERS:-5}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
+      MINIO_BUCKET_AVATAR: ${MINIO_BUCKET_AVATAR:-oj-avatar}
       TZ: Asia/Shanghai
     ports:
       - "8080:8080"
+    depends_on:
+      - rabbitmq
     extra_hosts:
       - "host-machine:host-gateway"
+    networks:
+      - oj-net
+
+  # ==================== RabbitMQ ====================
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: oj-rabbitmq
+    restart: always
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
     networks:
       - oj-net
 

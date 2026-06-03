@@ -3,7 +3,7 @@ import axios from 'axios'
 const api = axios.create({
   baseURL: '',
   timeout: 30000,
-  headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+  headers: {}
 })
 
 api.interceptors.request.use(config => {

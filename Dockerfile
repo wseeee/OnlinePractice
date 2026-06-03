@@ -13,7 +13,7 @@ RUN go mod download
 
 # 复制源码并编译
 COPY . .
-RUN go build -ldflags="-s -w" -o /app/server .
+RUN go build -ldflags="-s -w" -o /app/server ./cmd/server
 
 # ==================== 阶段二：最小运行镜像 ====================
 FROM alpine:3.21

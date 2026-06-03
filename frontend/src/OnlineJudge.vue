@@ -16,6 +16,14 @@
         </nav>
         <div class="header-right">
           <template v-if="token">
+            <button class="btn btn-sm" :class="todayChecked ? 'btn-outline' : 'btn-success'" @click="doCheckIn" :disabled="todayChecked">
+              {{ todayChecked ? '已签到 ' + checkInStreak + '天' : '签到' }}
+            </button>
+            <div class="avatar-wrap" @click="$refs.avatarInput.click()" title="点击更换头像">
+              <img v-if="avatarUrl" :src="avatarUrl" class="header-avatar" />
+              <div v-else class="header-avatar-placeholder">{{ userName.charAt(0).toUpperCase() }}</div>
+            </div>
+            <input ref="avatarInput" type="file" accept="image/jpeg,image/png,image/webp" style="display:none" @change="uploadAvatar" />
             <span class="user-name">{{ userName }}</span>
             <button class="btn btn-outline" @click="logout">退出</button>
           </template>
@@ -43,6 +51,13 @@
               <option value="">全部分类</option>
               <option v-for="cat in categories" :key="cat.identity" :value="cat.identity">{{ cat.name }}</option>
             </select>
+            <select v-model="problemSearch.difficulty" @change="fetchProblems" class="input select">
+              <option value="">全部难度</option>
+              <option value="1">Easy</option>
+              <option value="2">Medium</option>
+              <option value="3">Hard</option>
+              <option value="0">未知</option>
+            </select>
             <button class="btn btn-primary" @click="fetchProblems">搜索</button>
           </div>
           <div v-if="problemLoading" class="state-box"><span class="spinner"></span> 加载中...</div>
@@ -50,12 +65,13 @@
           <div v-else-if="problems.length === 0" class="state-box empty">暂无题目数据</div>
           <div v-else class="problem-table-wrap">
             <table class="data-table">
-              <thead><tr><th>状态</th><th>标题</th><th>通过率</th><th>提交数</th></tr></thead>
+              <thead><tr><th>状态</th><th>标题</th><th>难度</th><th>通过率</th><th>提交数</th></tr></thead>
               <tbody>
                 <tr v-for="p in problems" :key="p.identity" @click="openProblemDetail(p)" class="clickable">
                   <td><span class="status-dot" :class="{ passed: p.passed }"></span></td>
                   <td>{{ p.title }}</td>
-                  <td>{{ p.submit_num ? Math.round(p.pass_num / p.submit_num * 100) : 0 }}%</td>
+                  <td><span class="difficulty-badge" :class="difficultyClass(p.difficulty)">{{ difficultyLabel(p.difficulty) }}</span></td>
+                  <td>{{ p.pass_rate >= 0 ? (p.pass_rate / 100).toFixed(1) + '%' : '-' }}</td>
                   <td>{{ p.submit_num }}</td>
                 </tr>
               </tbody>
@@ -188,25 +204,136 @@
           <button class="btn btn-text" @click="currentView = 'problems'">← 返回题库</button>
           <div v-if="detailLoading" class="state-box"><span class="spinner"></span> 加载中...</div>
           <div v-else-if="detailError" class="state-box error">{{ detailError }}</div>
-          <div v-else class="detail-layout">
-            <div class="detail-left">
-              <h2>{{ detail.title }}</h2>
-              <div class="detail-meta">
-                <span>时间限制: {{ detail.max_runtime }}ms</span>
-                <span>内存限制: {{ detail.max_mem }}KB</span>
-                <span>提交: {{ detail.submit_num }}</span>
-                <span>通过: {{ detail.pass_num }}</span>
-              </div>
-              <div class="detail-content" v-html="renderedContent"></div>
+          <div v-else>
+            <div class="problem-tabs">
+              <a :class="{ active: problemTab === 'solve' }" @click="problemTab = 'solve'">答题</a>
+              <a :class="{ active: problemTab === 'solution' }" @click="problemTab = 'solution'; fetchProblemSolution()">题解</a>
+              <a :class="{ active: problemTab === 'discussion' }" @click="problemTab = 'discussion'; fetchProblemComments()">讨论</a>
+              <a :class="{ active: problemTab === 'code' }" @click="problemTab = 'code'; fetchProblemCodeShares()">代码</a>
             </div>
-            <div class="detail-right">
-              <div class="editor-panel">
-                <div class="panel-header">提交代码 (Go)</div>
-                <textarea v-model="submitCode" class="code-editor" placeholder="// 在此编写你的 Go 代码..." spellcheck="false"></textarea>
-                <button class="btn btn-primary btn-block" @click="doSubmit" :disabled="submitting || !token">
-                  {{ submitting ? '提交中...' : token ? '提交代码' : '请先登录' }}
-                </button>
-                <div v-if="submitResult" class="submit-result" :class="submitResultClass">{{ submitResult }}</div>
+
+            <!-- 答题 Tab -->
+            <div v-if="problemTab === 'solve'" class="detail-layout">
+              <div class="detail-left">
+                <h2>{{ detail.title }}</h2>
+                <div class="detail-meta">
+                  <span><span class="difficulty-badge" :class="difficultyClass(detail.difficulty)">{{ difficultyLabel(detail.difficulty) }}</span></span>
+                  <span>时间限制: {{ detail.max_runtime }}ms</span>
+                  <span>内存限制: {{ detail.max_mem }}KB</span>
+                  <span>提交: {{ detail.submit_num }}</span>
+                  <span>通过: {{ detail.pass_num }}</span>
+                </div>
+                <div class="detail-content" v-html="renderedContent"></div>
+                <div v-if="detail.test_cases && detail.test_cases.length" class="sample-tests" style="margin-top:20px; padding-top:16px; border-top:1px solid var(--border);">
+                  <h3 style="font-size:15px; font-weight:600; margin-bottom:12px;">样例测试</h3>
+                  <div v-for="(tc, i) in detail.test_cases" :key="tc.identity" style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px;">
+                    <div style="background:#f8fafc; border:1px solid var(--border); border-radius:var(--radius-sm); padding:12px;">
+                      <div style="font-size:12px; color:var(--text-secondary); margin-bottom:4px; font-weight:550;">输入 {{ i+1 }}</div>
+                      <pre style="font-family:'JetBrains Mono','Fira Code','Consolas',monospace; font-size:13px; color:#1e293b; white-space:pre-wrap; margin:0;">{{ tc.input }}</pre>
+                    </div>
+                    <div style="background:#f8fafc; border:1px solid var(--border); border-radius:var(--radius-sm); padding:12px;">
+                      <div style="font-size:12px; color:var(--text-secondary); margin-bottom:4px; font-weight:550;">输出 {{ i+1 }}</div>
+                      <pre style="font-family:'JetBrains Mono','Fira Code','Consolas',monospace; font-size:13px; color:#1e293b; white-space:pre-wrap; margin:0;">{{ tc.output }}</pre>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="detail-right">
+                <div class="editor-panel">
+                  <div class="panel-header">提交代码 (Go)</div>
+                  <textarea v-model="submitCode" class="code-editor" placeholder="// 在此编写你的 Go 代码..." spellcheck="false"></textarea>
+                  <button class="btn btn-primary btn-block" @click="doSubmit" :disabled="submitting || !token">
+                    {{ submitting ? '提交中...' : token ? '提交代码' : '请先登录' }}
+                  </button>
+                  <div v-if="submitResult" class="submit-result" :class="submitResultClass">{{ submitResult }}</div>
+                  <div v-if="submitResultClass === 'success' && lastSubmitIdentity" style="margin-top:8px">
+                    <button v-if="!lastSubmitShared" class="btn btn-success btn-sm" @click="shareCode(lastSubmitIdentity)">公开此代码</button>
+                    <span v-else style="font-size:13px; color:var(--success)">已公开</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 题解 Tab -->
+            <div v-if="problemTab === 'solution'" class="tab-content">
+              <div v-if="solutionLoading" class="state-box"><span class="spinner"></span> 加载中...</div>
+              <div v-else-if="!solutionData" class="state-box empty">暂无官方题解</div>
+              <div v-else class="solution-card">
+                <h3>{{ solutionData.title }}</h3>
+                <div class="solution-meta">语言: {{ solutionData.language }} | 更新: {{ formatTime(solutionData.updated_at) }}</div>
+                <div class="detail-content" style="margin-top:12px"><pre>{{ solutionData.content }}</pre></div>
+              </div>
+            </div>
+
+            <!-- 讨论 Tab -->
+            <div v-if="problemTab === 'discussion'" class="tab-content">
+              <div v-if="token" class="comment-form">
+                <textarea v-model="newComment" class="input textarea" placeholder="发表评论..." rows="3"></textarea>
+                <button class="btn btn-primary btn-sm" @click="postComment()" style="margin-top:8px">发表</button>
+              </div>
+              <div v-else class="state-box" style="padding:16px">请先登录后发表评论</div>
+              <div v-if="commentsLoading" class="state-box"><span class="spinner"></span> 加载中...</div>
+              <div v-else-if="comments.length === 0" class="state-box empty">暂无评论</div>
+              <div v-else class="comment-list">
+                <div v-for="cm in comments" :key="cm.identity" class="comment-item">
+                  <div class="comment-header">
+                    <span class="comment-user">{{ cm.user_name }}</span>
+                    <span class="comment-time">{{ formatTime(cm.created_at) }}</span>
+                    <button v-if="token && cm.user_identity === userIdentity" class="btn btn-text btn-sm" @click="deleteComment(cm.identity)">删除</button>
+                  </div>
+                  <div class="comment-body">{{ cm.content }}</div>
+                  <div v-if="token" class="comment-actions">
+                    <button class="btn btn-text btn-sm" @click="replyTo = cm.identity; newReply = ''">回复</button>
+                  </div>
+                  <!-- 回复框 -->
+                  <div v-if="replyTo === cm.identity" class="reply-form">
+                    <textarea v-model="newReply" class="input textarea" placeholder="回复..." rows="2"></textarea>
+                    <button class="btn btn-primary btn-sm" @click="postComment(cm.identity)" style="margin-top:4px">回复</button>
+                    <button class="btn btn-text btn-sm" @click="replyTo = ''" style="margin-top:4px">取消</button>
+                  </div>
+                  <!-- 回复列表 -->
+                  <div v-if="cm.replies && cm.replies.length > 0" class="reply-list">
+                    <div v-for="r in cm.replies" :key="r.identity" class="comment-item reply-item">
+                      <div class="comment-header">
+                        <span class="comment-user">{{ r.user_name }}</span>
+                        <span class="comment-time">{{ formatTime(r.created_at) }}</span>
+                        <button v-if="token && r.user_identity === userIdentity" class="btn btn-text btn-sm" @click="deleteComment(r.identity)">删除</button>
+                      </div>
+                      <div class="comment-body">{{ r.content }}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 代码 Tab -->
+            <div v-if="problemTab === 'code'" class="tab-content">
+              <div v-if="codeSharesLoading" class="state-box"><span class="spinner"></span> 加载中...</div>
+              <div v-else-if="codeShares.length === 0" class="state-box empty">暂无公开代码</div>
+              <div v-else>
+                <table class="data-table">
+                  <thead><tr><th>标题</th><th>用户</th><th>浏览</th><th>时间</th></tr></thead>
+                  <tbody>
+                    <tr v-for="s in codeShares" :key="s.identity" @click="openCodeShareDetail(s.identity)" class="clickable">
+                      <td>{{ s.title }}</td>
+                      <td>{{ s.user_name }}</td>
+                      <td>{{ s.view_count }}</td>
+                      <td>{{ formatTime(s.created_at) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- 代码详情弹层 -->
+            <div v-if="codeShareModal" class="modal-overlay" @click.self="codeShareModal = null">
+              <div class="modal-content">
+                <div class="modal-header">
+                  <h3>{{ codeShareModal.title }}</h3>
+                  <button class="btn-close" @click="codeShareModal = null">&times;</button>
+                </div>
+                <div class="solution-meta">{{ codeShareModal.user_name }} | {{ formatTime(codeShareModal.created_at) }}</div>
+                <pre class="code-block">{{ codeShareModal.code }}</pre>
               </div>
             </div>
           </div>
@@ -247,6 +374,7 @@
             <input v-model="submitSearch.user" placeholder="用户ID" class="input" />
             <select v-model="submitSearch.status" class="input select">
               <option value="">全部状态</option>
+              <option value="0">排队中</option>
               <option value="1">答案正确</option>
               <option value="2">答案错误</option>
               <option value="3">运行超时</option>
@@ -285,6 +413,7 @@
           <div class="admin-tabs">
             <button :class="{ active: adminTab === 'categories' }" @click="adminTab = 'categories'">分类管理</button>
             <button :class="{ active: adminTab === 'problem-create' }" @click="adminTab = 'problem-create'">新建题目</button>
+            <button :class="{ active: adminTab === 'solution-admin' }" @click="adminTab = 'solution-admin'; fetchAdminProblems()">题解管理</button>
             <button :class="{ active: adminTab === 'contest-admin' }" @click="adminTab = 'contest-admin'; fetchAdminContests()">比赛管理</button>
           </div>
 
@@ -329,6 +458,23 @@
                 <input v-model.number="problemForm.max_runtime" placeholder="最大运行时间(ms)" type="number" class="input" />
                 <input v-model.number="problemForm.max_mem" placeholder="最大内存(KB)" type="number" class="input" />
               </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>难度模式</label>
+                  <select v-model="problemForm.difficulty_mode" class="input select">
+                    <option :value="1">自动（根据通过率）</option>
+                    <option :value="2">手动设置</option>
+                  </select>
+                </div>
+                <div class="form-group" v-if="problemForm.difficulty_mode === 2">
+                  <label>手动难度</label>
+                  <select v-model="problemForm.difficulty" class="input select">
+                    <option :value="1">Easy</option>
+                    <option :value="2">Medium</option>
+                    <option :value="3">Hard</option>
+                  </select>
+                </div>
+              </div>
               <div class="form-group">
                 <label>分类 (多选)</label>
                 <div class="checkbox-group">
@@ -369,6 +515,36 @@
                 </tr>
               </tbody>
             </table>
+          </div>
+
+          <!-- 题解管理 -->
+          <div v-if="adminTab === 'solution-admin'" class="admin-section">
+            <div class="form-card">
+              <h4>编辑题解</h4>
+              <div class="form-group">
+                <label>选择题目</label>
+                <select v-model="solutionAdminProblem" class="input select" @change="loadSolutionForEdit">
+                  <option value="">请选择题目</option>
+                  <option v-for="p in adminProblems" :key="p.identity" :value="p.identity">{{ p.title }}</option>
+                </select>
+              </div>
+              <div v-if="solutionAdminProblem">
+                <input v-model="solutionAdminForm.title" placeholder="题解标题" class="input" />
+                <textarea v-model="solutionAdminForm.content" placeholder="题解内容" class="input textarea" rows="10"></textarea>
+                <div class="form-row">
+                  <input v-model="solutionAdminForm.language" placeholder="语言" class="input" value="go" />
+                  <select v-model="solutionAdminForm.is_published" class="input select">
+                    <option :value="1">发布</option>
+                    <option :value="0">草稿</option>
+                  </select>
+                </div>
+                <div class="form-actions" style="margin-top:12px">
+                  <button class="btn btn-primary" @click="saveSolution">保存题解</button>
+                  <button class="btn btn-danger" @click="deleteSolution">删除题解</button>
+                </div>
+              </div>
+              <div v-if="solutionAdminMsg" class="form-msg" :class="{ error: solutionAdminError }">{{ solutionAdminMsg }}</div>
+            </div>
           </div>
 
           <!-- 比赛管理 -->
@@ -460,6 +636,75 @@ const currentView = ref('problems')
 const token = ref(localStorage.getItem('oj_token') || '')
 const userName = ref(localStorage.getItem('oj_name') || '')
 const isAdmin = ref(Number(localStorage.getItem('oj_admin')) === 1)
+const userIdentity = computed(() => {
+  try {
+    const payload = JSON.parse(atob(token.value.split('.')[1]))
+    return payload.identity || ''
+  } catch { return '' }
+})
+
+// ======================== 签到 ========================
+const todayChecked = ref(false)
+const checkInStreak = ref(0)
+const checkInTotal = ref(0)
+const checkInPoints = ref(0)
+
+function fetchCheckInStatus() {
+  if (!token.value) return
+  api.get('/user/check-in-status').then(res => {
+    if (res.data.code === 200) {
+      const d = res.data.data
+      todayChecked.value = d.today_checked
+      checkInStreak.value = d.streak
+      checkInTotal.value = d.check_in_total
+      checkInPoints.value = d.check_in_points
+    }
+  }).catch(() => {})
+}
+
+function doCheckIn() {
+  if (todayChecked.value) return
+  api.post('/user/check-in').then(res => {
+    if (res.data.code === 200) {
+      const d = res.data.data
+      todayChecked.value = true
+      checkInStreak.value = d.streak
+      checkInTotal.value = d.check_in_total
+      checkInPoints.value = d.check_in_points
+      showToast('签到成功 +' + d.points_earned + ' 积分', 'success')
+    } else {
+      showToast(res.data.msg || '签到失败', 'error')
+    }
+  }).catch(() => { showToast('签到请求失败', 'error') })
+}
+
+// ======================== 头像 ========================
+const avatarUrl = ref('')
+
+function fetchAvatarUrl() {
+  if (!token.value) return
+  api.get('/user/avatar-url').then(res => {
+    if (res.data.code === 200 && res.data.data) {
+      avatarUrl.value = res.data.data.avatar_url
+    }
+  }).catch(() => {})
+}
+
+function uploadAvatar(e) {
+  const file = e.target.files[0]
+  if (!file) return
+  if (file.size > 2 * 1024 * 1024) { showToast('头像最大 2MB', 'error'); return }
+  const fd = new FormData()
+  fd.append('file', file)
+  api.post('/user/avatar-upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } }).then(res => {
+    if (res.data.code === 200) {
+      avatarUrl.value = res.data.data.avatar_url
+      showToast('头像更新成功', 'success')
+    } else {
+      showToast(res.data.msg || '上传失败', 'error')
+    }
+  }).catch(() => { showToast('上传失败', 'error') })
+}
 
 // Toast
 const toast = reactive({ show: false, msg: '', type: 'info' })
@@ -484,6 +729,8 @@ function switchView(v) {
 function logout() {
   token.value = ''; userName.value = ''; isAdmin.value = false
   localStorage.removeItem('oj_token'); localStorage.removeItem('oj_name'); localStorage.removeItem('oj_admin')
+  if (ws) { ws.close(); ws = null }
+  clearTimeout(wsReconnectTimer)
   router.push('/login')
 }
 
@@ -494,12 +741,12 @@ const problemError = ref('')
 const problemTotal = ref(0)
 const problemPage = ref(1)
 const problemSize = 20
-const problemSearch = reactive({ keyword: '', category: '' })
+const problemSearch = reactive({ keyword: '', category: '', difficulty: '' })
 
 function fetchProblems() {
   problemLoading.value = true; problemError.value = ''
   api.get('/problem-list', {
-    params: { page: problemPage.value, size: problemSize, keyword: problemSearch.keyword, category_identity: problemSearch.category }
+    params: { page: problemPage.value, size: problemSize, keyword: problemSearch.keyword, category_identity: problemSearch.category, difficulty: problemSearch.difficulty || undefined }
   }).then(res => {
     const d = res.data
     if (d.code === 200) { problems.value = d.data.list; problemTotal.value = d.data.count }
@@ -519,9 +766,103 @@ const submitResultClass = ref('')
 
 const renderedContent = computed(() => detail.value.content || '')
 
+// ======================== 题目 Tab ========================
+const problemTab = ref('solve')
+const lastSubmitIdentity = ref('')
+const lastSubmitShared = ref(false)
+
+// ======================== 题解 ========================
+const solutionData = ref(null)
+const solutionLoading = ref(false)
+
+function fetchProblemSolution() {
+  solutionLoading.value = true
+  api.get('/problem-solution', { params: { problem_identity: currentProblemId.value } })
+    .then(res => { solutionData.value = res.data.code === 200 ? res.data.data : null })
+    .catch(() => { solutionData.value = null })
+    .finally(() => { solutionLoading.value = false })
+}
+
+// ======================== 讨论 ========================
+const comments = ref([])
+const commentsLoading = ref(false)
+const newComment = ref('')
+const newReply = ref('')
+const replyTo = ref('')
+
+function fetchProblemComments() {
+  commentsLoading.value = true
+  api.get('/problem-comments', { params: { problem_identity: currentProblemId.value, size: 100 } })
+    .then(res => { comments.value = res.data.code === 200 ? res.data.data.list : [] })
+    .catch(() => { comments.value = [] })
+    .finally(() => { commentsLoading.value = false })
+}
+
+function postComment(parentIdentity) {
+  const content = parentIdentity ? newReply.value : newComment.value
+  if (!content.trim()) return
+  api.post('/user/problem-comment', {
+    problem_identity: currentProblemId.value,
+    parent_identity: parentIdentity || '',
+    content: content.trim()
+  }).then(res => {
+    if (res.data.code === 200) {
+      if (parentIdentity) { newReply.value = ''; replyTo.value = '' }
+      else newComment.value = ''
+      fetchProblemComments()
+    } else showToast(res.data.msg, 'error')
+  })
+}
+
+function deleteComment(identity) {
+  if (!confirm('确定删除？')) return
+  api.delete('/user/problem-comment', { params: { identity } }).then(res => {
+    if (res.data.code === 200) fetchProblemComments()
+    else showToast(res.data.msg, 'error')
+  })
+}
+
+// ======================== 代码分享 ========================
+const codeShares = ref([])
+const codeSharesLoading = ref(false)
+const codeShareModal = ref(null)
+
+function fetchProblemCodeShares() {
+  codeSharesLoading.value = true
+  api.get('/problem-code-shares', { params: { problem_identity: currentProblemId.value, size: 50 } })
+    .then(res => { codeShares.value = res.data.code === 200 ? res.data.data.list : [] })
+    .catch(() => { codeShares.value = [] })
+    .finally(() => { codeSharesLoading.value = false })
+}
+
+function openCodeShareDetail(identity) {
+  api.get('/code-share-detail', { params: { identity } }).then(res => {
+    if (res.data.code === 200) codeShareModal.value = res.data.data
+  })
+}
+
+function shareCode(submitIdentity) {
+  api.post('/user/code-share', { submit_identity: submitIdentity, title: 'AC 代码' }).then(res => {
+    if (res.data.code === 200) { lastSubmitShared.value = true; showToast('分享成功', 'success') }
+    else showToast(res.data.msg, 'error')
+  })
+}
+
+// ======================== 难度工具 ========================
+function difficultyLabel(d) {
+  return { 0: '未知', 1: 'Easy', 2: 'Medium', 3: 'Hard' }[d] || '未知'
+}
+function difficultyClass(d) {
+  return { 0: 'diff-unknown', 1: 'diff-easy', 2: 'diff-medium', 3: 'diff-hard' }[d] || 'diff-unknown'
+}
+
 function openProblemDetail(p) {
   currentProblemId.value = p.identity
   detailLoading.value = true; detailError.value = ''; submitResult.value = ''
+  problemTab.value = 'solve'
+  lastSubmitIdentity.value = ''
+  lastSubmitShared.value = false
+  solutionData.value = null; comments.value = []; codeShares.value = []
   api.get('/problem-detail', { params: { identity: p.identity } }).then(res => {
     const d = res.data
     if (d.code === 200) detail.value = d.data
@@ -532,7 +873,7 @@ function openProblemDetail(p) {
 
 function doSubmit() {
   if (!submitCode.value.trim()) { showToast('请输入代码', 'error'); return }
-  submitting.value = true; submitResult.value = ''
+  submitting.value = true; submitResult.value = ''; lastSubmitIdentity.value = ''; lastSubmitShared.value = false
   api.post('/user/code-submit', submitCode.value, {
     params: { problem_identity: currentProblemId.value },
     headers: { 'Content-Type': 'text/plain' }
@@ -540,14 +881,40 @@ function doSubmit() {
     const d = res.data
     if (d.code === 200) {
       const status = d.data.status
-      const labels = { 1: '答案正确', 2: '答案错误', 3: '运行超时', 4: '运行超内存', 5: '编译错误', 6: '无效代码' }
-      const classes = { 1: 'success', 2: 'error', 3: 'error', 4: 'error', 5: 'error', 6: 'error' }
-      submitResult.value = labels[status] || d.data.msg
-      submitResultClass.value = classes[status] || 'error'
+      lastSubmitIdentity.value = d.data.submit_identity
+      if (status === 0) {
+        // 异步排队中，轮询结果
+        submitResult.value = '排队中...'
+        submitResultClass.value = 'warn'
+        pollSubmitResult(d.data.submit_identity)
+      } else {
+        const labels = { 1: '答案正确', 2: '答案错误', 3: '运行超时', 4: '运行超内存', 5: '编译错误', 6: '无效代码' }
+        const classes = { 1: 'success', 2: 'error', 3: 'error', 4: 'error', 5: 'error', 6: 'error' }
+        submitResult.value = labels[status] || d.data.msg
+        submitResultClass.value = classes[status] || 'error'
+      }
     } else {
       submitResult.value = d.msg || '提交失败'; submitResultClass.value = 'error'
     }
   }).catch(() => { submitResult.value = '提交请求失败'; submitResultClass.value = 'error' }).finally(() => { submitting.value = false })
+}
+
+function pollSubmitResult(identity) {
+  const labels = { 1: '答案正确', 2: '答案错误', 3: '运行超时', 4: '运行超内存', 5: '编译错误', 6: '无效代码' }
+  const classes = { 1: 'success', 2: 'error', 3: 'error', 4: 'error', 5: 'error', 6: 'error' }
+  const timer = setInterval(async () => {
+    try {
+      const res = await api.get('/user/submit-result', { params: { identity } })
+      if (res.data.code === 200 && res.data.data.status !== 0) {
+        clearInterval(timer)
+        submitting.value = false
+        submitResult.value = labels[res.data.data.status] || res.data.data.msg
+        submitResultClass.value = classes[res.data.data.status] || 'error'
+      }
+    } catch (e) { /* 继续轮询 */ }
+  }, 2000)
+  // 5 分钟超时停止轮询
+  setTimeout(() => clearInterval(timer), 300000)
 }
 
 // ======================== 排行榜 ========================
@@ -592,10 +959,10 @@ function fetchSubmitList() {
 }
 
 function statusClass(s) {
-  return { 1: 'success', 2: 'error', 3: 'warn', 4: 'warn', 5: 'error', 6: 'error' }[s] || ''
+  return { 0: 'warn', 1: 'success', 2: 'error', 3: 'warn', 4: 'warn', 5: 'error', 6: 'error' }[s] || ''
 }
 function statusLabel(s) {
-  return { 1: 'AC', 2: 'WA', 3: 'TLE', 4: 'MLE', 5: 'CE', 6: '无效' }[s] || '未知'
+  return { 0: '排队中', 1: 'AC', 2: 'WA', 3: 'TLE', 4: 'MLE', 5: 'CE', 6: '无效' }[s] || '未知'
 }
 function formatTime(t) {
   if (!t) return '-'
@@ -661,7 +1028,8 @@ function deleteCategory(identity) {
 const adminTab = ref('categories')
 const problemForm = reactive({
   title: '', content: '', max_runtime: 1000, max_mem: 256,
-  category_ids: [], test_cases: [{ input: '', output: '' }]
+  category_ids: [], test_cases: [{ input: '', output: '' }],
+  difficulty_mode: 1, difficulty: 0
 })
 const problemSaving = ref(false)
 const problemFormMsg = ref('')
@@ -671,7 +1039,7 @@ const adminProblems = ref([])
 const problemSearch2 = reactive({ keyword: '' })
 
 function resetProblemForm() {
-  Object.assign(problemForm, { title: '', content: '', max_runtime: 1000, max_mem: 256, category_ids: [], test_cases: [{ input: '', output: '' }] })
+  Object.assign(problemForm, { title: '', content: '', max_runtime: 1000, max_mem: 256, category_ids: [], test_cases: [{ input: '', output: '' }], difficulty_mode: 1, difficulty: 0 })
   problemFormMsg.value = ''
 }
 
@@ -684,6 +1052,8 @@ function saveProblem() {
   const fd = new URLSearchParams()
   fd.append('title', f.title); fd.append('content', f.content)
   fd.append('max_runtime', f.max_runtime); fd.append('max_mem', f.max_mem)
+  fd.append('difficulty_mode', f.difficulty_mode)
+  if (f.difficulty_mode === 2) fd.append('difficulty', f.difficulty)
   f.category_ids.forEach(id => fd.append(editingProblem.value ? 'category_id' : 'category_ids', id))
   f.test_cases.forEach(tc => fd.append('test_cases', JSON.stringify({ input: tc.input, output: tc.output })))
 
@@ -719,8 +1089,53 @@ function loadProblemForEdit(identity) {
       problemForm.max_runtime = p.max_runtime; problemForm.max_mem = p.max_mem
       problemForm.category_ids = (p.problem_categories || []).map(pc => String(pc.category_id))
       problemForm.test_cases = (p.test_cases || []).map(tc => ({ input: tc.input, output: tc.output }))
+      problemForm.difficulty_mode = p.difficulty_mode || 1
+      problemForm.difficulty = p.difficulty || 0
       problemFormMsg.value = ''
     }
+  })
+}
+
+// ======================== 题解管理 ========================
+const solutionAdminProblem = ref('')
+const solutionAdminForm = reactive({ title: '官方题解', content: '', language: 'go', is_published: 1 })
+const solutionAdminMsg = ref('')
+const solutionAdminError = ref(false)
+
+function loadSolutionForEdit() {
+  if (!solutionAdminProblem.value) return
+  api.get('/problem-solution', { params: { problem_identity: solutionAdminProblem.value } }).then(res => {
+    if (res.data.code === 200 && res.data.data) {
+      const d = res.data.data
+      solutionAdminForm.title = d.title; solutionAdminForm.content = d.content
+      solutionAdminForm.language = d.language; solutionAdminForm.is_published = d.is_published
+    } else {
+      solutionAdminForm.title = '官方题解'; solutionAdminForm.content = ''
+      solutionAdminForm.language = 'go'; solutionAdminForm.is_published = 1
+    }
+  })
+}
+
+function saveSolution() {
+  if (!solutionAdminProblem.value || !solutionAdminForm.content) { solutionAdminMsg.value = '请选择题目并填写内容'; solutionAdminError.value = true; return }
+  const fd = new URLSearchParams()
+  fd.append('problem_identity', solutionAdminProblem.value)
+  fd.append('title', solutionAdminForm.title)
+  fd.append('content', solutionAdminForm.content)
+  fd.append('language', solutionAdminForm.language)
+  fd.append('is_published', solutionAdminForm.is_published)
+  api.put('/admin/problem-solution', fd).then(res => {
+    if (res.data.code === 200) { solutionAdminMsg.value = '保存成功'; solutionAdminError.value = false }
+    else { solutionAdminMsg.value = res.data.msg; solutionAdminError.value = true }
+  }).catch(() => { solutionAdminMsg.value = '请求失败'; solutionAdminError.value = true })
+}
+
+function deleteSolution() {
+  if (!solutionAdminProblem.value) return
+  if (!confirm('确定删除该题解？')) return
+  api.delete('/admin/problem-solution', { params: { problem_identity: solutionAdminProblem.value } }).then(res => {
+    if (res.data.code === 200) { solutionAdminMsg.value = '删除成功'; solutionAdminError.value = false; solutionAdminForm.content = '' }
+    else { solutionAdminMsg.value = res.data.msg; solutionAdminError.value = true }
   })
 }
 
@@ -813,23 +1228,54 @@ async function submitContestCode() {
       headers: { 'Content-Type': 'text/plain' }
     })
     if (res.data.code === 200) {
-      contestSubmitMsg.value = res.data.data.msg + ' (得分: ' + res.data.data.score + ')'
-      contestSubmitColor.value = res.data.data.status === 1 ? 'var(--success)' : 'var(--error)'
-      const subRes = await api.get('/user/contest-submits', { params: { contest_identity: contestDetail.value.contest.identity, size: 1000 } })
-      if (subRes.data.code === 200) {
-        contestSubmits.value = subRes.data.data.list
-        const scores = {}
-        for (const s of subRes.data.data.list) {
-          const cur = scores[s.problem_identity] ?? 0
-          if (s.score > cur) scores[s.problem_identity] = s.score
-        }
-        contestMyScores.value = scores
+      const data = res.data.data
+      if (data.status === 0) {
+        contestSubmitMsg.value = '排队中...'
+        contestSubmitColor.value = 'var(--warn)'
+        pollContestResult(data.submit_identity)
+      } else {
+        contestSubmitMsg.value = data.msg + (data.score !== undefined ? ' (得分: ' + data.score + ')' : '')
+        contestSubmitColor.value = data.status === 1 ? 'var(--success)' : 'var(--error)'
+        refreshContestSubmits()
       }
     } else {
       contestSubmitMsg.value = res.data.msg; contestSubmitColor.value = 'var(--error)'
     }
   } catch (e) { contestSubmitMsg.value = '网络错误'; contestSubmitColor.value = 'var(--error)' }
   finally { contestSubmitting.value = false }
+}
+
+function pollContestResult(identity) {
+  const timer = setInterval(async () => {
+    try {
+      const res = await api.get('/user/submit-result', { params: { identity } })
+      if (res.data.code === 200 && res.data.data.status !== 0) {
+        clearInterval(timer)
+        const d = res.data.data
+        contestSubmitMsg.value = d.msg + (d.score !== undefined ? ' (得分: ' + d.score + ')' : '')
+        contestSubmitColor.value = d.status === 1 ? 'var(--success)' : 'var(--error)'
+        contestSubmitting.value = false
+        refreshContestSubmits()
+      }
+    } catch (e) { /* 继续轮询 */ }
+  }, 2000)
+  setTimeout(() => clearInterval(timer), 300000)
+}
+
+async function refreshContestSubmits() {
+  if (!contestDetail.value) return
+  try {
+    const subRes = await api.get('/user/contest-submits', { params: { contest_identity: contestDetail.value.contest.identity, size: 1000 } })
+    if (subRes.data.code === 200) {
+      contestSubmits.value = subRes.data.data.list
+      const scores = {}
+      for (const s of subRes.data.data.list) {
+        const cur = scores[s.problem_identity] ?? 0
+        if (s.score > cur) scores[s.problem_identity] = s.score
+      }
+      contestMyScores.value = scores
+    }
+  } catch (e) { /* ignore */ }
 }
 
 async function fetchContestRank() {
@@ -934,9 +1380,54 @@ async function deleteContest(identity) {
   } catch (e) { showToast('删除失败', 'error') }
 }
 
+// ======================== WebSocket ========================
+let ws = null
+let wsReconnectTimer = null
+
+function connectWebSocket() {
+  if (!token.value) return
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  // 开发模式直连后端，避免 Vite WebSocket 代理不稳定
+  const host = import.meta.env.DEV ? 'localhost:8080' : location.host
+  const wsUrl = `${protocol}//${host}/ws?token=${token.value}`
+  ws = new WebSocket(wsUrl)
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data)
+      if (data.type === 'judge_result') {
+        // 收到判题结果，更新对应 UI
+        if (data.status !== 0) {
+          const labels = { 1: '答案正确', 2: '答案错误', 3: '运行超时', 4: '运行超内存', 5: '编译错误', 6: '无效代码' }
+          const classes = { 1: 'success', 2: 'error', 3: 'error', 4: 'error', 5: 'error', 6: 'error' }
+          // 更新普通提交结果
+          submitResult.value = labels[data.status] || data.msg
+          submitResultClass.value = classes[data.status] || 'error'
+          submitting.value = false
+          // 更新比赛提交结果
+          contestSubmitMsg.value = data.msg + (data.score ? ' (得分: ' + data.score + ')' : '')
+          contestSubmitColor.value = data.status === 1 ? 'var(--success)' : 'var(--error)'
+          contestSubmitting.value = false
+          if (data.record_type === 'contest') refreshContestSubmits()
+        }
+      }
+    } catch (e) { /* ignore */ }
+  }
+  ws.onclose = () => {
+    if (token.value) {
+      wsReconnectTimer = setTimeout(connectWebSocket, 3000)
+    }
+  }
+  ws.onerror = () => { ws.close() }
+}
+
 // ======================== 初始化 ========================
 onMounted(() => {
   fetchProblems()
+  if (token.value) {
+    connectWebSocket()
+    fetchCheckInStatus()
+    fetchAvatarUrl()
+  }
   // 预加载分类列表（仅管理员可用，普通用户静默失败）
   if (isAdmin.value) {
     api.get('/admin/category-list', { params: { page: 1, size: 999 } }).then(res => {
@@ -945,223 +1436,6 @@ onMounted(() => {
   }
 })
 </script>
-
 <style>
-/* ======================== CSS Reset & Variables ======================== */
-* { margin: 0; padding: 0; box-sizing: border-box; }
-
-:root {
-  --primary: #4f46e5;
-  --primary-hover: #4338ca;
-  --primary-light: #eef2ff;
-  --success: #059669;
-  --success-bg: #ecfdf5;
-  --error: #dc2626;
-  --error-bg: #fef2f2;
-  --warn: #d97706;
-  --warn-bg: #fffbeb;
-  --bg: #f3f4f6;
-  --surface: #ffffff;
-  --border: #e5e7eb;
-  --text: #111827;
-  --text-secondary: #6b7280;
-  --radius: 8px;
-  --shadow: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.06);
-  --shadow-lg: 0 10px 25px rgba(0,0,0,.1);
-  --font: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-}
-
-body { background: var(--bg); font-family: var(--font); color: var(--text); -webkit-font-smoothing: antialiased; }
-
-/* ======================== Layout ======================== */
-.oj-header {
-  background: var(--surface); border-bottom: 1px solid var(--border);
-  position: sticky; top: 0; z-index: 100; box-shadow: var(--shadow);
-}
-.header-inner {
-  max-width: 1200px; margin: 0 auto; padding: 0 24px;
-  display: flex; align-items: center; height: 60px; gap: 32px;
-}
-.logo {
-  display: flex; align-items: center; gap: 8px; font-size: 18px; font-weight: 700;
-  color: var(--primary); cursor: pointer; user-select: none; white-space: nowrap;
-}
-.logo-icon { width: 24px; height: 24px; }
-.header-nav { display: flex; gap: 4px; flex: 1; }
-.header-nav a {
-  padding: 8px 16px; border-radius: var(--radius); font-size: 14px; font-weight: 500;
-  color: var(--text-secondary); cursor: pointer; transition: all .2s; text-decoration: none;
-}
-.header-nav a:hover { background: var(--primary-light); color: var(--primary); }
-.header-nav a.active { background: var(--primary-light); color: var(--primary); font-weight: 600; }
-.header-right { display: flex; align-items: center; gap: 12px; white-space: nowrap; }
-.user-name { font-size: 14px; color: var(--text-secondary); }
-
-.container { max-width: 1200px; margin: 0 auto; padding: 24px; }
-.page-header { margin-bottom: 24px; }
-.page-header h2 { font-size: 24px; font-weight: 700; }
-.subtitle { color: var(--text-secondary); margin-top: 4px; font-size: 14px; }
-
-/* ======================== Buttons ======================== */
-.btn {
-  padding: 8px 20px; border: none; border-radius: var(--radius); font-size: 14px; font-weight: 500;
-  cursor: pointer; transition: all .2s; display: inline-flex; align-items: center; justify-content: center;
-  gap: 6px; font-family: var(--font);
-}
-.btn:disabled { opacity: .5; cursor: not-allowed; }
-.btn-primary { background: var(--primary); color: #fff; }
-.btn-primary:hover:not(:disabled) { background: var(--primary-hover); }
-.btn-outline { background: transparent; color: var(--text); border: 1px solid var(--border); }
-.btn-outline:hover:not(:disabled) { background: var(--bg); border-color: #9ca3af; }
-.btn-success { background: var(--success); color: #fff; }
-.btn-success:hover:not(:disabled) { background: #047857; }
-.btn-danger { background: var(--error); color: #fff; }
-.btn-danger:hover:not(:disabled) { background: #b91c1c; }
-.btn-text { background: none; border: none; color: var(--primary); padding: 8px 0; font-size: 14px; }
-.btn-text:hover { text-decoration: underline; }
-.btn-sm { padding: 4px 12px; font-size: 12px; border-radius: 6px; }
-.btn-block { width: 100%; }
-.btn-close { background: none; border: none; font-size: 22px; color: var(--text-secondary); cursor: pointer; line-height: 1; }
-
-/* ======================== Input ======================== */
-.input {
-  width: 100%; padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--radius);
-  font-size: 14px; font-family: var(--font); transition: border .2s; background: var(--surface);
-  color: var(--text);
-}
-.input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79,70,229,.1); }
-.select { cursor: pointer; appearance: auto; min-width: 150px; }
-.textarea { resize: vertical; min-height: 120px; }
-
-/* ======================== Data Table ======================== */
-.data-table { width: 100%; border-collapse: collapse; background: var(--surface); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
-.data-table th { background: #f9fafb; padding: 12px 16px; text-align: left; font-weight: 600; font-size: 13px; color: var(--text-secondary); border-bottom: 1px solid var(--border); }
-.data-table td { padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 14px; }
-.data-table tr:last-child td { border-bottom: none; }
-.data-table tr.clickable { cursor: pointer; transition: background .15s; }
-.data-table tr.clickable:hover { background: var(--primary-light); }
-.status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--border); }
-.status-dot.passed { background: var(--success); }
-.status-tag {
-  display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600;
-}
-.status-tag.success { background: var(--success-bg); color: var(--success); }
-.status-tag.error { background: var(--error-bg); color: var(--error); }
-.status-tag.warn { background: var(--warn-bg); color: var(--warn); }
-.rank-badge {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 28px; height: 28px; border-radius: 50%; font-size: 13px; font-weight: 700;
-  background: var(--bg); color: var(--text-secondary);
-}
-.rank-badge.rank-1 { background: #fef3c7; color: #b45309; }
-.rank-badge.rank-2 { background: #e5e7eb; color: #4b5563; }
-.rank-badge.rank-3 { background: #fed7aa; color: #9a3412; }
-
-/* ======================== Pagination ======================== */
-.pagination {
-  display: flex; align-items: center; justify-content: center; gap: 16px; padding: 16px 0;
-  font-size: 14px; color: var(--text-secondary);
-}
-.pagination button {
-  padding: 6px 16px; border: 1px solid var(--border); border-radius: var(--radius);
-  background: var(--surface); cursor: pointer; font-size: 14px; transition: all .2s;
-}
-.pagination button:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
-.pagination button:disabled { opacity: .4; cursor: not-allowed; }
-
-/* ======================== Search Bar ======================== */
-.search-bar { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
-.search-bar .input { width: auto; flex: 1; min-width: 160px; }
-.search-bar .select { width: 180px; flex: none; }
-.search-bar .btn { flex: none; }
-
-/* ======================== State Boxes ======================== */
-.state-box {
-  text-align: center; padding: 48px 24px; color: var(--text-secondary); font-size: 15px;
-}
-.state-box.error { color: var(--error); }
-.state-box.empty { color: var(--text-secondary); }
-.spinner {
-  display: inline-block; width: 20px; height: 20px; border: 2px solid var(--border);
-  border-top-color: var(--primary); border-radius: 50%; animation: spin .6s linear infinite;
-  vertical-align: middle; margin-right: 8px;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
-
-/* ======================== Detail Page ======================== */
-.detail-layout { display: grid; grid-template-columns: 1fr 400px; gap: 24px; align-items: start; }
-@media (max-width: 900px) { .detail-layout { grid-template-columns: 1fr; } }
-.detail-left {
-  background: var(--surface); border-radius: var(--radius); padding: 24px; box-shadow: var(--shadow);
-}
-.detail-left h2 { font-size: 22px; margin-bottom: 12px; }
-.detail-meta { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
-.detail-meta span { font-size: 13px; color: var(--text-secondary); }
-.detail-content { font-size: 15px; line-height: 1.8; }
-.detail-content pre { background: #1e293b; color: #e2e8f0; padding: 16px; border-radius: var(--radius); overflow-x: auto; }
-.detail-right { position: sticky; top: 80px; }
-.editor-panel { background: var(--surface); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow); }
-.panel-header { font-weight: 600; margin-bottom: 12px; font-size: 15px; }
-.code-editor {
-  width: 100%; height: 320px; padding: 16px; font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
-  font-size: 13px; line-height: 1.6; border: 1px solid var(--border); border-radius: var(--radius);
-  background: #1e293b; color: #e2e8f0; resize: vertical;
-}
-.code-editor:focus { outline: none; border-color: var(--primary); }
-.code-editor::placeholder { color: #64748b; }
-.submit-result { margin-top: 12px; padding: 10px 14px; border-radius: var(--radius); font-size: 14px; font-weight: 600; text-align: center; }
-.submit-result.success { background: var(--success-bg); color: var(--success); }
-.submit-result.error { background: var(--error-bg); color: var(--error); }
-
-/* ======================== Admin ======================== */
-.admin-tabs { display: flex; gap: 4px; margin-bottom: 20px; }
-.admin-tabs button {
-  padding: 8px 20px; border: 1px solid var(--border); border-radius: var(--radius);
-  background: var(--surface); cursor: pointer; font-size: 14px; transition: all .2s;
-}
-.admin-tabs button.active { background: var(--primary); color: #fff; border-color: var(--primary); }
-.admin-section { margin-bottom: 24px; }
-.form-card {
-  background: var(--surface); border-radius: var(--radius); padding: 24px;
-  box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 14px;
-  margin-bottom: 20px;
-}
-.form-card h4 { font-size: 16px; margin-bottom: 4px; }
-.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.form-group label { display: block; font-size: 14px; font-weight: 500; margin-bottom: 6px; }
-.checkbox-group { display: flex; flex-wrap: wrap; gap: 8px; }
-.checkbox-label {
-  display: flex; align-items: center; gap: 4px; font-size: 14px; cursor: pointer;
-  padding: 4px 10px; border: 1px solid var(--border); border-radius: var(--radius);
-  transition: all .2s;
-}
-.checkbox-label:has(input:checked) { background: var(--primary-light); border-color: var(--primary); color: var(--primary); }
-.test-case-row { display: flex; gap: 8px; align-items: center; }
-.test-case-row .input { flex: 1; }
-.form-actions { display: flex; gap: 12px; align-items: center; }
-.form-msg { font-size: 13px; color: var(--success); }
-.form-msg.error { color: var(--error); }
-
-/* ======================== Toast ======================== */
-.toast {
-  position: fixed; top: 24px; left: 50%; transform: translateX(-50%);
-  padding: 12px 24px; border-radius: var(--radius); font-size: 14px; font-weight: 500;
-  z-index: 999; box-shadow: var(--shadow-lg);
-}
-.toast.info { background: #1e293b; color: #fff; }
-.toast.success { background: var(--success); color: #fff; }
-.toast.error { background: var(--error); color: #fff; }
-.toast-fade-enter-active { transition: all .3s ease-out; }
-.toast-fade-leave-active { transition: all .25s ease-in; }
-.toast-fade-enter-from, .toast-fade-leave-to { opacity: 0; transform: translateX(-50%) translateY(-12px); }
-
-/* ======================== Contest ======================== */
-.status-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
-.status-waiting { background: #e6f7ff; color: #1890ff; }
-.status-running { background: #f6ffed; color: #52c41a; }
-.status-ended { background: #fff1f0; color: #ff4d4f; }
-.right-tabs { display: flex; gap: 12px; margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
-.right-tabs a { cursor: pointer; padding: 4px 8px; font-size: 14px; color: var(--text-secondary); transition: all .2s; }
-.right-tabs a.active { border-bottom: 2px solid var(--primary); color: var(--primary); font-weight: 600; }
-.selected-row { background: var(--primary-light) !important; }
+@import "./styles.css";
 </style>
